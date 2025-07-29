@@ -6,7 +6,13 @@ if (!class_exists('WooCommerce')) {
     wp_die('WooCommerce is required for this checkout page.');
 }
 
+// Force WooCommerce to treat this as a checkout page
+add_filter('woocommerce_is_checkout', '__return_true');
+global $wp_query;
+$wp_query->is_checkout = true;
+
 // Initialize WooCommerce
+WC()->frontend_includes();
 if (!WC()->cart) {
     WC()->initialize_cart();
 }
@@ -32,32 +38,11 @@ $checkout = WC()->checkout();
 
 // Get cart data
 $cart = WC()->cart;
-$cart_total = $cart->get_total();
-$cart_subtotal = $cart->get_subtotal();
 $cart_items = $cart->get_cart();
-$cart_count = $cart->get_cart_contents_count();
 
 // Get available payment gateways
 $available_gateways = WC()->payment_gateways->get_available_payment_gateways();
 
-// Get real products from your store
-$available_products = wc_get_products(array(
-    'limit' => 10,
-    'status' => 'publish'
-));
-
-// Ensure cart has products
-if (WC()->cart->is_empty() && !empty($available_products)) {
-    WC()->cart->add_to_cart($available_products[0]->get_id(), 1);
-    // Set custom price for fallback
-    add_action('woocommerce_before_calculate_totals', function($cart) use ($hardcoded_fallback_price) {
-        if (is_admin() && !defined('DOING_AJAX')) return;
-        foreach ($cart->get_cart() as $cart_item) {
-            $cart_item['data']->set_price($hardcoded_fallback_price);
-        }
-    }, 10, 1);
-    WC()->cart->calculate_totals();
-}
 
 // Get actual cart price or use hardcoded fallback
 $original_price = $hardcoded_fallback_price; // Default to hardcoded fallback
@@ -70,14 +55,6 @@ if (!empty($cart_items)) {
         $is_from_funnel = true;
         break; // Get first item price
     }
-} elseif (!empty($available_products)) {
-    // Check if we should use product price or hardcoded fallback
-    $product_price = floatval($available_products[0]->get_price());
-    if ($product_price > 0) {
-        // Use product price if it exists and is greater than 0
-        $original_price = $product_price;
-    }
-    // Otherwise keep the hardcoded fallback price
 }
 
 // Product configuration - FREE SHIPPING FOR ALL
@@ -88,18 +65,17 @@ function calculate_black_market_price($our_price, $markup_percentage) {
     return $our_price * (1 + ($markup_percentage / 100));
 }
 
+// Get cart data for display
+$cart_total = $cart->get_total();
+$cart_subtotal = $cart->get_subtotal();
+$cart_count = $cart->get_cart_contents_count();
+
 // Get order bump packages - simplified for WooCommerce native
 function get_order_bump_packages_native() {
-    $products = wc_get_products(array('limit' => 1, 'status' => 'publish'));
-    if (empty($products)) {
-        return array();
-    }
-
-    $base_product = $products[0];
 
     return array(
         0 => array(
-            'product_id' => $base_product->get_id(),
+            'product_id' => 1, // Use actual product ID
             'quantity' => 2,
             'pills_total' => 8,
             'title' => 'Viagra – Buy 2 Packs',
@@ -114,7 +90,7 @@ function get_order_bump_packages_native() {
             'free_shipping' => false
         ),
         1 => array(
-            'product_id' => $base_product->get_id(),
+            'product_id' => 1, // Use actual product ID
             'quantity' => 5,
             'pills_total' => 20,
             'title' => 'Viagra – Buy 5 Packs',
@@ -129,7 +105,7 @@ function get_order_bump_packages_native() {
             'free_shipping' => true
         ),
         2 => array(
-            'product_id' => $base_product->get_id(),
+            'product_id' => 1, // Use actual product ID
             'quantity' => 10,
             'pills_total' => 40,
             'title' => 'Viagra – Buy 10 Packs',
@@ -144,7 +120,7 @@ function get_order_bump_packages_native() {
             'free_shipping' => true
         ),
         3 => array(
-            'product_id' => $base_product->get_id(),
+            'product_id' => 1, // Use actual product ID
             'quantity' => 20,
             'pills_total' => 80,
             'title' => 'Viagra – Buy 20 Packs',
@@ -173,31 +149,20 @@ if (!empty($cart_items)) {
             'title' => 'Viagra 50mg',
             'discreet_title' => 'Viagra 50mg',
             'quantity' => $cart_item['quantity'],
-            'price' => 2.49,
+            'price' => floatval($cart_item['line_total'] / $cart_item['quantity']),
             'product_id' => $cart_item['product_id']
         );
         break; // Get first item for display
     }
 } else {
     // If cart is empty, use hardcoded fallback
-    if (!empty($available_products)) {
-        $current_cart_info = array(
-            'title' => $hardcoded_fallback_title,
-            'discreet_title' => $hardcoded_fallback_title,
-            'quantity' => $hardcoded_fallback_quantity,
-            'price' => $hardcoded_fallback_price,
-            'product_id' => $available_products[0]->get_id()
-        );
-    } else {
-        // Fallback if no products exist
-        $current_cart_info = array(
-            'title' => $hardcoded_fallback_title,
-            'discreet_title' => $hardcoded_fallback_title,
-            'quantity' => $hardcoded_fallback_quantity,
-            'price' => $hardcoded_fallback_price,
-            'product_id' => 0
-        );
-    }
+    $current_cart_info = array(
+        'title' => $hardcoded_fallback_title,
+        'discreet_title' => $hardcoded_fallback_title,
+        'quantity' => $hardcoded_fallback_quantity,
+        'price' => $hardcoded_fallback_price,
+        'product_id' => 1 // Use actual product ID
+    );
 }
 
 // Calculate initial totals (FREE SHIPPING FOR ALL)
@@ -1864,6 +1829,7 @@ echo $head;
                 <input type="hidden" id="selected_package_id" name="selected_package_id" value="">
                 
                 <!-- WooCommerce Required Hidden Fields -->
+                <input type="hidden" name="woocommerce-process-checkout" value="1" />
                 <input type="hidden" name="woocommerce-process-checkout-nonce" value="<?php echo wp_create_nonce('woocommerce-process_checkout'); ?>" />
                 <input type="hidden" name="_wp_http_referer" value="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" />
                 
@@ -2566,6 +2532,7 @@ echo $head;
                                 <input type="hidden" id="selected_package_id" name="selected_package_id" value="">
                                 
                                 <!-- WooCommerce Required Hidden Fields -->
+                                <input type="hidden" name="woocommerce-process-checkout" value="1" />
                                 <input type="hidden" name="woocommerce-process-checkout-nonce" value="<?php echo wp_create_nonce('woocommerce-process_checkout'); ?>" />
                                 <input type="hidden" name="_wp_http_referer" value="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" />
                                 
