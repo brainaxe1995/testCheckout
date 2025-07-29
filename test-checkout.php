@@ -6,30 +6,19 @@ if (!class_exists('WooCommerce')) {
     wp_die('WooCommerce is required for this checkout page.');
 }
 
-// Initialize WooCommerce
-if (!WC()->cart) {
-    WC()->initialize_cart();
-}
-if (!WC()->customer) {
-    WC()->initialize_customer();
-}
-if (!WC()->session) {
-    WC()->initialize_session();
-}
 
-// ===== PRICING CONFIGURATION ===== 
-// Change this percentage to adjust black market pricing across the entire page
-$black_market_markup_percentage = 50; // 50% higher than our price
+// Force this page to be treated as checkout
+add_filter('woocommerce_is_checkout', '__return_true');
 
-// ===== HARDCODED PRICE FALLBACK CONFIGURATION =====
-// This price will be used when no cart items are found (direct checkout visits)
-$hardcoded_fallback_price = 2.49; // Set your desired fallback price here
-$hardcoded_fallback_title = 'Viagra 50mg'; // Set your desired fallback title here
-$hardcoded_fallback_quantity = 1; // Set your desired fallback quantity here
+global $wp_query;
+$wp_query->is_checkout = true;
 
-// Initialize WooCommerce checkout
+// Initialize WooCommerce properly
+WC()->frontend_includes();
+if (!WC()->session) WC()->initialize_session();
+if (!WC()->cart) WC()->initialize_cart();
+if (!WC()->customer) WC()->initialize_customer();
 $checkout = WC()->checkout();
-
 // Get cart data
 $cart = WC()->cart;
 $cart_total = $cart->get_total();
@@ -40,170 +29,6 @@ $cart_count = $cart->get_cart_contents_count();
 // Get available payment gateways
 $available_gateways = WC()->payment_gateways->get_available_payment_gateways();
 
-// Get real products from your store
-$available_products = wc_get_products(array(
-    'limit' => 10,
-    'status' => 'publish'
-));
-
-// Ensure cart has products
-if (WC()->cart->is_empty() && !empty($available_products)) {
-    WC()->cart->add_to_cart($available_products[0]->get_id(), 1);
-    // Set custom price for fallback
-    add_action('woocommerce_before_calculate_totals', function($cart) use ($hardcoded_fallback_price) {
-        if (is_admin() && !defined('DOING_AJAX')) return;
-        foreach ($cart->get_cart() as $cart_item) {
-            $cart_item['data']->set_price($hardcoded_fallback_price);
-        }
-    }, 10, 1);
-    WC()->cart->calculate_totals();
-}
-
-// Get actual cart price or use hardcoded fallback
-$original_price = $hardcoded_fallback_price; // Default to hardcoded fallback
-$is_from_funnel = false; // Track if user came from funnel
-
-if (!empty($cart_items)) {
-    // User has items in cart (likely from funnel)
-    foreach ($cart_items as $cart_item_key => $cart_item) {
-        $original_price = floatval($cart_item['line_total'] / $cart_item['quantity']);
-        $is_from_funnel = true;
-        break; // Get first item price
-    }
-} elseif (!empty($available_products)) {
-    // Check if we should use product price or hardcoded fallback
-    $product_price = floatval($available_products[0]->get_price());
-    if ($product_price > 0) {
-        // Use product price if it exists and is greater than 0
-        $original_price = $product_price;
-    }
-    // Otherwise keep the hardcoded fallback price
-}
-
-// Product configuration - FREE SHIPPING FOR ALL
-$shipping_cost = 0.00; // FREE SHIPPING
-
-// Function to calculate black market price
-function calculate_black_market_price($our_price, $markup_percentage) {
-    return $our_price * (1 + ($markup_percentage / 100));
-}
-
-// Get order bump packages - simplified for WooCommerce native
-function get_order_bump_packages_native() {
-    $products = wc_get_products(array('limit' => 1, 'status' => 'publish'));
-    if (empty($products)) {
-        return array();
-    }
-
-    $base_product = $products[0];
-
-    return array(
-        0 => array(
-            'product_id' => $base_product->get_id(),
-            'quantity' => 2,
-            'pills_total' => 8,
-            'title' => 'Viagra – Buy 2 Packs',
-            'discreet_title' => 'Viagra (2 Packs)',
-            'description' => '2 Packs (8 pills total) • Enhanced vitality support',
-            'price' => 3.95,
-            'original_price' => 4.98, // 2 × 2.49
-            'black_market_price' => 5.00,
-            'savings' => 1.03, // 4.98 - 3.95
-            'badge' => 'POPULAR',
-            'badge_color' => 'convert-orange',
-            'free_shipping' => false
-        ),
-        1 => array(
-            'product_id' => $base_product->get_id(),
-            'quantity' => 5,
-            'pills_total' => 20,
-            'title' => 'Viagra – Buy 5 Packs',
-            'discreet_title' => 'Viagra (5 Packs)',
-            'description' => '5 Packs (20 pills total) • Free shipping included',
-            'price' => 4.95,
-            'original_price' => 12.45, // 5 × 2.49
-            'black_market_price' => 13.00,
-            'savings' => 7.50, // 12.45 - 4.95
-            'badge' => 'BEST VALUE',
-            'badge_color' => 'medical-blue',
-            'free_shipping' => true
-        ),
-        2 => array(
-            'product_id' => $base_product->get_id(),
-            'quantity' => 10,
-            'pills_total' => 40,
-            'title' => 'Viagra – Buy 10 Packs',
-            'discreet_title' => 'Viagra (10 Packs)',
-            'description' => '10 Packs (40 pills total) • Free shipping + Free Guide',
-            'price' => 6.95,
-            'original_price' => 24.90, // 10 × 2.49
-            'black_market_price' => 25.00,
-            'savings' => 17.95, // 24.90 - 6.95
-            'badge' => 'MAX SAVINGS',
-            'badge_color' => 'purple-600',
-            'free_shipping' => true
-        ),
-        3 => array(
-            'product_id' => $base_product->get_id(),
-            'quantity' => 20,
-            'pills_total' => 80,
-            'title' => 'Viagra – Buy 20 Packs',
-            'discreet_title' => 'Viagra (20 Packs)',
-            'description' => '20 Packs (80 pills total) • Free shipping + Free Guide + VIP Support',
-            'price' => 9.95,
-            'original_price' => 49.80, // 20 × 2.49
-            'black_market_price' => 50.00,
-            'savings' => 39.85, // 49.80 - 9.95
-            'badge' => 'ULTIMATE DEAL',
-            'badge_color' => 'gradient-to-r from-purple-600 to-pink-600',
-            'free_shipping' => true
-        )
-    );
-}
-
-// Get order bump packages
-$order_bump_packages = get_order_bump_packages_native();
-
-// Get current cart information for display with discreet naming
-$current_cart_info = array();
-if (!empty($cart_items)) {
-    foreach ($cart_items as $cart_item_key => $cart_item) {
-        $product = $cart_item['data'];
-        $current_cart_info = array(
-            'title' => 'Viagra 50mg',
-            'discreet_title' => 'Viagra 50mg',
-            'quantity' => $cart_item['quantity'],
-            'price' => 2.49,
-            'product_id' => $cart_item['product_id']
-        );
-        break; // Get first item for display
-    }
-} else {
-    // If cart is empty, use hardcoded fallback
-    if (!empty($available_products)) {
-        $current_cart_info = array(
-            'title' => $hardcoded_fallback_title,
-            'discreet_title' => $hardcoded_fallback_title,
-            'quantity' => $hardcoded_fallback_quantity,
-            'price' => $hardcoded_fallback_price,
-            'product_id' => $available_products[0]->get_id()
-        );
-    } else {
-        // Fallback if no products exist
-        $current_cart_info = array(
-            'title' => $hardcoded_fallback_title,
-            'discreet_title' => $hardcoded_fallback_title,
-            'quantity' => $hardcoded_fallback_quantity,
-            'price' => $hardcoded_fallback_price,
-            'product_id' => 0
-        );
-    }
-}
-
-// Calculate initial totals (FREE SHIPPING FOR ALL)
-$initial_subtotal = $current_cart_info['price'] ?? $hardcoded_fallback_price;
-$initial_shipping = 0.00; // FREE SHIPPING
-$initial_total = $initial_subtotal; // No shipping cost
 
 // Block WordPress CSS but keep header functionality
 ob_start();
@@ -3339,8 +3164,6 @@ echo $head;
             enhanceForm();
             initPaymentMethods();
             
-            // Set initial display to original cart (with FREE shipping and discreet naming)
-            resetToOriginalCart();
 
             // Show video popup after 3 seconds
             setTimeout(() => {
