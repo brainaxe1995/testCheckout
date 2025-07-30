@@ -33,6 +33,19 @@ $cart_total = $cart->get_total();
 $cart_subtotal = $cart->get_subtotal();
 $cart_items = $cart->get_cart();
 
+// Handle AJAX requests for updating the cart with a bundle selection
+add_action( 'wp_ajax_update_cart_bundle', 'test_checkout_update_cart_bundle' );
+add_action( 'wp_ajax_nopriv_update_cart_bundle', 'test_checkout_update_cart_bundle' );
+
+function test_checkout_update_cart_bundle() {
+    check_ajax_referer( 'update_cart_bundle', 'nonce' );
+
+    $bundle_data = isset( $_POST['bundle_data'] ) ? json_decode( wp_unslash( $_POST['bundle_data'] ), true ) : array();
+    WC()->session->set( 'selected_bundle_data', $bundle_data );
+
+    wp_send_json_success();
+}
+
 // Hardcoded bundle packages (you can make this dynamic later)
 $bundle_packages = array(
     array(
@@ -539,6 +552,18 @@ function updateCartWithBundle(bundleId, bundleData) {
     .catch(error => {
         console.error('Error updating cart:', error);
     });
+}
+
+// Placeholder tracking function used by order bump selections
+function trackPackageSelection(bundleId, bundleData) {
+    console.log('Tracking package selection:', bundleId, bundleData);
+}
+
+// Example order bump handler
+function selectOrderBump(bundleId, index) {
+    console.log('Selecting order bump:', bundleId);
+    trackPackageSelection(bundleId, index);
+    selectBundle(bundleId, index);
 }
 
 // Countdown timer
