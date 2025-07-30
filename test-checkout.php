@@ -1,8 +1,208 @@
 <?php
-/*
-Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shipping
-*/
+/* Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shipping */
+
+// Ensure WooCommerce is active
+if (!class_exists('WooCommerce')) {
+    wp_die('WooCommerce is required for this checkout page.');
+}
+
+// Force WooCommerce to treat this as a checkout page
+add_filter('woocommerce_is_checkout', '__return_true');
+global $wp_query;
+$wp_query->is_checkout = true;
+
+// Initialize WooCommerce
+WC()->frontend_includes();
+WC()->init();
+if (!WC()->cart) {
+    WC()->initialize_cart();
+}
+if (!WC()->customer) {
+    WC()->initialize_customer();
+}
+if (!WC()->session) {
+    WC()->initialize_session();
+}
+
+// ===== PRICING CONFIGURATION ===== 
+// Change this percentage to adjust black market pricing across the entire page
+$black_market_markup_percentage = 50; // 50% higher than our price
+
+// ===== HARDCODED PRICE FALLBACK CONFIGURATION =====
+// This price will be used when no cart items are found (direct checkout visits)
+$hardcoded_fallback_price = 2.49; // Set your desired fallback price here
+$hardcoded_fallback_title = 'Viagra 50mg'; // Set your desired fallback title here
+$hardcoded_fallback_quantity = 1; // Set your desired fallback quantity here
+
+// Initialize WooCommerce checkout
+$checkout = WC()->checkout();
+
+// Get cart data
+$cart = WC()->cart;
+$cart_items = $cart->get_cart();
+
+// Get available payment gateways
+$available_gateways = WC()->payment_gateways->get_available_payment_gateways();
+
+
+// Get actual cart price or use hardcoded fallback
+$original_price = $hardcoded_fallback_price; // Default to hardcoded fallback
+$is_from_funnel = false; // Track if user came from funnel
+
+if (!empty($cart_items)) {
+    // User has items in cart (likely from funnel)
+    foreach ($cart_items as $cart_item_key => $cart_item) {
+        $original_price = floatval($cart_item['line_total'] / $cart_item['quantity']);
+        $is_from_funnel = true;
+        break; // Get first item price
+    }
+}
+
+// Product configuration - FREE SHIPPING FOR ALL
+$shipping_cost = 0.00; // FREE SHIPPING
+
+// Function to calculate black market price
+function calculate_black_market_price($our_price, $markup_percentage) {
+    return $our_price * (1 + ($markup_percentage / 100));
+}
+
+// Get cart data for display
+$cart_total = $cart->get_total();
+$cart_subtotal = $cart->get_subtotal();
+$cart_count = $cart->get_cart_contents_count();
+
+// Get order bump packages - simplified for WooCommerce native
+function get_order_bump_packages_native() {
+
+    return array(
+        0 => array(
+            'product_id' => 1, // Use actual product ID
+            'quantity' => 2,
+            'pills_total' => 8,
+            'title' => 'Viagra – Buy 2 Packs',
+            'discreet_title' => 'Viagra (2 Packs)',
+            'description' => '2 Packs (8 pills total) • Enhanced vitality support',
+            'price' => 3.95,
+            'original_price' => 4.98, // 2 × 2.49
+            'black_market_price' => 5.00,
+            'savings' => 1.03, // 4.98 - 3.95
+            'badge' => 'POPULAR',
+            'badge_color' => 'convert-orange',
+            'free_shipping' => false
+        ),
+        1 => array(
+            'product_id' => 1, // Use actual product ID
+            'quantity' => 5,
+            'pills_total' => 20,
+            'title' => 'Viagra – Buy 5 Packs',
+            'discreet_title' => 'Viagra (5 Packs)',
+            'description' => '5 Packs (20 pills total) • Free shipping included',
+            'price' => 4.95,
+            'original_price' => 12.45, // 5 × 2.49
+            'black_market_price' => 13.00,
+            'savings' => 7.50, // 12.45 - 4.95
+            'badge' => 'BEST VALUE',
+            'badge_color' => 'medical-blue',
+            'free_shipping' => true
+        ),
+        2 => array(
+            'product_id' => 1, // Use actual product ID
+            'quantity' => 10,
+            'pills_total' => 40,
+            'title' => 'Viagra – Buy 10 Packs',
+            'discreet_title' => 'Viagra (10 Packs)',
+            'description' => '10 Packs (40 pills total) • Free shipping + Free Guide',
+            'price' => 6.95,
+            'original_price' => 24.90, // 10 × 2.49
+            'black_market_price' => 25.00,
+            'savings' => 17.95, // 24.90 - 6.95
+            'badge' => 'MAX SAVINGS',
+            'badge_color' => 'purple-600',
+            'free_shipping' => true
+        ),
+        3 => array(
+            'product_id' => 1, // Use actual product ID
+            'quantity' => 20,
+            'pills_total' => 80,
+            'title' => 'Viagra – Buy 20 Packs',
+            'discreet_title' => 'Viagra (20 Packs)',
+            'description' => '20 Packs (80 pills total) • Free shipping + Free Guide + VIP Support',
+            'price' => 9.95,
+            'original_price' => 49.80, // 20 × 2.49
+            'black_market_price' => 50.00,
+            'savings' => 39.85, // 49.80 - 9.95
+            'badge' => 'ULTIMATE DEAL',
+            'badge_color' => 'gradient-to-r from-purple-600 to-pink-600',
+            'free_shipping' => true
+        )
+    );
+}
+
+// Get order bump packages
+$order_bump_packages = get_order_bump_packages_native();
+
+// Allow custom pricing when a bundle is selected
+add_action('woocommerce_before_calculate_totals', function($cart) {
+    if (is_admin() && !defined('DOING_AJAX')) return;
+    foreach ($cart->get_cart() as $cart_item) {
+        if (isset($cart_item['custom_price'])) {
+            $cart_item['data']->set_price($cart_item['custom_price']);
+        }
+    }
+});
+
+// If a package selection was posted, update the cart with that bundle
+if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== '') {
+    $pkg_id = intval($_POST['selected_package_id']);
+    if (isset($order_bump_packages[$pkg_id])) {
+        $pkg = $order_bump_packages[$pkg_id];
+        WC()->cart->empty_cart();
+        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price']));
+        WC()->cart->calculate_totals();
+        $cart_items = WC()->cart->get_cart(); // refresh for display
+    }
+}
+
+// Get current cart information for display with discreet naming
+$current_cart_info = array();
+if (!empty($cart_items)) {
+    foreach ($cart_items as $cart_item_key => $cart_item) {
+        $product = $cart_item['data'];
+        $current_cart_info = array(
+            'title' => 'Viagra 50mg',
+            'discreet_title' => 'Viagra 50mg',
+            'quantity' => $cart_item['quantity'],
+            'price' => floatval($cart_item['line_total'] / $cart_item['quantity']),
+            'product_id' => $cart_item['product_id']
+        );
+        break; // Get first item for display
+    }
+} else {
+    // If cart is empty, use hardcoded fallback
+    $current_cart_info = array(
+        'title' => $hardcoded_fallback_title,
+        'discreet_title' => $hardcoded_fallback_title,
+        'quantity' => $hardcoded_fallback_quantity,
+        'price' => $hardcoded_fallback_price,
+        'product_id' => 1 // Use actual product ID
+    );
+}
+
+// Calculate initial totals (FREE SHIPPING FOR ALL)
+$initial_subtotal = $current_cart_info['price'] ?? $hardcoded_fallback_price;
+$initial_shipping = 0.00; // FREE SHIPPING
+$initial_total = $initial_subtotal; // No shipping cost
+
+// Block WordPress CSS but keep header functionality - we'll output this within the <head> tag
+$head_output = '';
+ob_start();
+wp_head();
+$head_output = ob_get_clean();
+$head_output = preg_replace('/<link[^>]*stylesheet[^>]*>/i', '', $head_output);
+$head_output = preg_replace('/<style[^>]*>.*?<\\/style>/is', '', $head_output);
+
 ?>
+
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -12,6 +212,8 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
     <script src="https://cdn.tailwindcss.com"></script>
     <script src="https://js.mollie.com/v1/mollie.js"></script>
     <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@400;500;600;700;800;900&family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+    <?php echo $head_output; ?>
 
     <script>
         tailwind.config = {
@@ -247,6 +449,13 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             }
         }
         
+        .container:has(.custom-breadcrumb-wrapper) {
+            display: none !important;
+        }
+        .xoo-wsc-markup, header, footer {
+            display: none !important;
+        }
+        
         body {
             font-family: 'Inter', system-ui, -apple-system, sans-serif;
             line-height: 1.6;
@@ -382,6 +591,11 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         .form-input.error {
             border-color: #ef4444;
             background: #fef2f2;
+        }
+
+        .form-input.valid {
+            border-color: #3CB371;
+            background: #F0FDF4;
         }
         
         .error-message {
@@ -859,6 +1073,78 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         .mobile-payment-form-container {
             transition: all 0.3s ease;
         }
+        
+        /* Style WooCommerce payment forms */
+        .payment-box {
+            background: transparent;
+        }
+        
+        .payment-box p {
+            margin-bottom: 1rem;
+            color: #6b7280;
+            font-size: 14px;
+        }
+        
+        .payment-box .form-row {
+            margin-bottom: 1rem;
+        }
+        
+        .payment-box label {
+            display: block;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.5rem;
+            font-size: 14px;
+        }
+        
+        .payment-box input[type="text"],
+        .payment-box input[type="email"],
+        .payment-box input[type="tel"],
+        .payment-box input[type="password"],
+        .payment-box select {
+            width: 100%;
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            padding: 12px 16px;
+            font-size: 14px;
+            transition: all 0.3s ease;
+            background: #fafbfc;
+        }
+        
+        .payment-box input:focus,
+        .payment-box select:focus {
+            border-color: #3CB371;
+            box-shadow: 0 0 0 3px rgba(60, 179, 113, 0.1);
+            background: white;
+            outline: none;
+        }
+        
+        .payment-box .wc-credit-card-form {
+            background: transparent;
+            padding: 0;
+        }
+        
+        .payment-box .wc-credit-card-form-card-number,
+        .payment-box .wc-credit-card-form-card-expiry,
+        .payment-box .wc-credit-card-form-card-cvc {
+            margin-bottom: 1rem;
+        }
+        
+        /* Mobile payment form adjustments */
+        @media (max-width: 768px) {
+            .payment-box input[type="text"],
+            .payment-box input[type="email"],
+            .payment-box input[type="tel"],
+            .payment-box input[type="password"],
+            .payment-box select {
+                padding: 10px 12px;
+                font-size: 16px; /* Prevent zoom on iOS */
+            }
+        }
+        div#wpadminbar {
+        display: none !important;
+        }
+
 
         /* Delivery Time Badge Styles */
         .delivery-badge {
@@ -1005,10 +1291,94 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         .reset-to-original-btn:active {
             transform: translateY(0);
         }
+
+        /* Mollie Components Styling */
+        .mollie-components {
+            background: transparent;
+            padding: 0;
+            border: none;
+            box-shadow: none;
+        }
+
+        .mollie-component {
+            border: 2px solid #e2e8f0;
+            border-radius: 8px;
+            background: #fafbfc;
+            height: 48px;
+            padding: 0 12px;
+            display: flex;
+            align-items: center;
+            transition: all 0.3s ease;
+            margin-bottom: 1rem;
+        }
+
+        .mollie-component:hover {
+            border-color: #9ca3af;
+        }
+
+        .mollie-component:focus-within {
+            border-color: #3CB371;
+            box-shadow: 0 0 0 3px rgba(60, 179, 113, 0.1);
+            background: white;
+        }
+
+        .mollie-component-label {
+            display: block;
+            font-size: 14px;
+            font-weight: 600;
+            color: #374151;
+            margin-bottom: 0.5rem;
+        }
+
+        .mollie-component iframe {
+            border: none !important;
+            width: 100% !important;
+            height: 20px !important;
+            background: transparent !important;
+        }
+
+        #cardHolder, #cardNumber {
+            margin-bottom: 1rem;
+        }
+
+        #expiryDate, #verificationCode {
+            width: calc(50% - 8px);
+            display: inline-block;
+            vertical-align: top;
+            margin-bottom: 1rem;
+        }
+
+        #expiryDate {
+            margin-right: 16px;
+        }
+
+        .cardToken {
+            display: none;
+        }
+
+        /* Error styling for Mollie components */
+        .mollie-component.error {
+            border-color: #dc2626;
+            background-color: #fef2f2;
+        }
+
+        .mollie-component.error:focus-within {
+            box-shadow: 0 0 0 3px rgba(220, 38, 38, 0.1);
+        }
+
+        /* Mobile responsive for Mollie */
+        @media (max-width: 480px) {
+            #expiryDate, #verificationCode {
+                width: 100%;
+                margin-right: 0;
+                margin-bottom: 1rem;
+            }
+        }
     </style>
 </head>
 
-<body class="bg-gray-50 text-gray-900 font-inter">
+<body <?php body_class(); ?> class="bg-gray-50 text-gray-900 font-inter">
+    <?php wp_body_open(); ?>
 
     <!-- Video Reviews Popup -->
     <div class="video-popup-overlay" id="videoPopup" style="display: none">
@@ -1119,6 +1489,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 <div class="flex items-center justify-center gap-3">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-6">
                     <img src="https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg" alt="Stripe" class="h-6">
+                    
                 </div>
                 
                 <!-- Trust Message -->
@@ -1154,7 +1525,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             <div class="flex items-center gap-4">
                 <div class="mobile-product-image-container">
                     <img 
-                        src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=200&h=200&fit=crop" 
+                        src="/wp-content/uploads/2025/07/viagra.jpg" 
                         alt="Viagra" 
                         class="w-24 h-24 object-cover"
                     />
@@ -1166,7 +1537,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 </div>
                 <div class="flex-1">
                     <h3 id="mobile-product-title" class="font-black text-gray-900 text-lg mb-1">
-                        Viagra 50mg
+                        <?php echo esc_html($current_cart_info['discreet_title'] ?? $hardcoded_fallback_title); ?>
                     </h3>
                     <p class="text-sm text-gray-600 mb-2">
                         <svg class="icon icon-sm inline-block text-medical-blue" fill="currentColor" viewBox="0 0 20 20">
@@ -1177,10 +1548,10 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                     <p class="text-sm text-medical-blue font-bold mb-2">#1 prescribed solution in USA</p>
                     <div class="flex items-center gap-2 mb-2">
                         <span id="mobile-product-price" class="text-xl font-black text-trust-green">
-                            $2.49
+                            $<?php echo number_format($current_cart_info['price'] ?? $hardcoded_fallback_price, 2); ?>
                         </span>
                         <span class="text-sm line-through text-gray-400" id="mobile-black-market-price">
-                            $3.74
+                            $<?php echo number_format(calculate_black_market_price($current_cart_info['price'] ?? $hardcoded_fallback_price, $black_market_markup_percentage), 2); ?>
                         </span>
                     </div>
                     <div class="flex gap-2 flex-wrap mb-2">
@@ -1223,7 +1594,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                         <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/>
                     </svg>
-                    Market price: 50% higher!
+                    Market price: <?php echo $black_market_markup_percentage; ?>% higher!
                 </span>
             </div>
         </div>
@@ -1245,74 +1616,28 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 <svg class="icon icon-sm" fill="currentColor" viewBox="0 0 20 20">
                     <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
                 </svg>
-                Back to Single Price ($2.49)
+                Back to Single Price ($<?php echo number_format($current_cart_info['price'] ?? $hardcoded_fallback_price, 2); ?>)
             </button>
             
             <div class="relative">
                 <div class="mobile-package-grid">
-                    <!-- Package 1 -->
-                    <div class="mobile-package-card" onclick="selectMobilePackage(1, 'Viagra 50mg', '$2.49')">
+                    <?php foreach ($order_bump_packages as $bump_id => $package): ?>
+                    <div class="mobile-package-card" 
+                         onclick="selectMobilePackage(<?php echo $bump_id; ?>, '<?php echo $package['discreet_title']; ?>', '$<?php echo number_format($package['price'], 2); ?>')">
                         <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
                             4 PILLS PER PACK 50mg
                         </div>
-                        <div class="text-sm font-bold text-gray-900 mb-1">1 Pack</div>
-                        <div class="text-xs text-gray-600 mb-1">4 pills total</div>
-                        <div class="text-lg font-black text-trust-green mb-1">$2.49</div>
-                        <div class="text-xs text-gray-500 mb-1">$2.49 per pack</div>
-                        <div class="text-xs line-through text-red-500 mb-2">Market: $3.74</div>
+                        <div class="text-sm font-bold text-gray-900 mb-1"><?php echo $package['quantity']; ?> Packs</div>
+                        <div class="text-xs text-gray-600 mb-1"><?php echo $package['pills_total']; ?> pills total</div>
+                        <div class="text-lg font-black text-trust-green mb-1">$<?php echo number_format($package['price'], 2); ?></div>
+                        <div class="text-xs text-gray-500 mb-1">$<?php echo number_format($package['price'] / $package['quantity'], 2); ?> per pack</div>
+                        <div class="text-xs line-through text-red-500 mb-2">Market: $<?php echo number_format($package['black_market_price'], 2); ?></div>
                         <div class="text-xs text-trust-green font-bold mb-2">+ FREE SHIPPING</div>
-                        <span class="bg-blue-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                            STARTER
+                        <span class="bg-<?php echo $package['badge_color']; ?> text-white px-2 py-1 rounded-full text-xs font-bold">
+                            <?php echo $package['badge']; ?>
                         </span>
                     </div>
-                    
-                    <!-- Package 2 -->
-                    <div class="mobile-package-card" onclick="selectMobilePackage(2, 'Viagra 50mg', '$4.98')">
-                        <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
-                            4 PILLS PER PACK 50mg
-                        </div>
-                        <div class="text-sm font-bold text-gray-900 mb-1">2 Packs</div>
-                        <div class="text-xs text-gray-600 mb-1">8 pills total</div>
-                        <div class="text-lg font-black text-trust-green mb-1">$4.98</div>
-                        <div class="text-xs text-gray-500 mb-1">$2.49 per pack</div>
-                        <div class="text-xs line-through text-red-500 mb-2">Market: $7.47</div>
-                        <div class="text-xs text-trust-green font-bold mb-2">+ FREE SHIPPING</div>
-                        <span class="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                            POPULAR
-                        </span>
-                    </div>
-                    
-                    <!-- Package 3 -->
-                    <div class="mobile-package-card" onclick="selectMobilePackage(3, 'Viagra 50mg', '$12.45')">
-                        <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
-                            4 PILLS PER PACK 50mg
-                        </div>
-                        <div class="text-sm font-bold text-gray-900 mb-1">5 Packs</div>
-                        <div class="text-xs text-gray-600 mb-1">20 pills total</div>
-                        <div class="text-lg font-black text-trust-green mb-1">$12.45</div>
-                        <div class="text-xs text-gray-500 mb-1">$2.49 per pack</div>
-                        <div class="text-xs line-through text-red-500 mb-2">Market: $18.70</div>
-                        <div class="text-xs text-trust-green font-bold mb-2">+ FREE SHIPPING</div>
-                        <span class="bg-orange-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                            BEST VALUE
-                        </span>
-                    </div>
-                    
-                    <!-- Package 4 -->
-                    <div class="mobile-package-card" onclick="selectMobilePackage(4, 'Viagra 50mg', '$24.90')">
-                        <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
-                            4 PILLS PER PACK 50mg
-                        </div>
-                        <div class="text-sm font-bold text-gray-900 mb-1">10 Packs</div>
-                        <div class="text-xs text-gray-600 mb-1">40 pills total</div>
-                        <div class="text-lg font-black text-trust-green mb-1">$24.90</div>
-                        <div class="text-xs text-gray-500 mb-1">$2.49 per pack</div>
-                        <div class="text-xs line-through text-red-500 mb-2">Market: $37.35</div>
-                        <div class="text-xs text-trust-green font-bold mb-2">+ FREE SHIPPING</div>
-                        <span class="bg-purple-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                            PREMIUM
-                        </span>
-                    </div>
+                    <?php endforeach; ?>
                 </div>
                 <div class="scroll-hint"></div>
             </div>
@@ -1367,27 +1692,24 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 Billing Information
             </h3>
             
-            <form id="mobile-checkout-form" class="checkout-form" novalidate>
+            <form name="checkout" method="post" class="checkout woocommerce-checkout" action="<?php echo esc_url( wc_get_checkout_url() ); ?>" enctype="multipart/form-data" novalidate="novalidate">
                 
                 <!-- Name / Email / Phone -->
                 <div class="space-y-4 mb-6">
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-1">First Name *</label>
-                            <input type="text" name="billing_first_name" class="form-input w-full text-sm" required>
-                            <span class="error-message" id="error-billing_first_name"></span>
+                            <input type="text" name="billing_first_name" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_first_name' ) ); ?>" required>
                         </div>
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-1">Last Name *</label>
-                            <input type="text" name="billing_last_name" class="form-input w-full text-sm" required>
-                            <span class="error-message" id="error-billing_last_name"></span>
+                            <input type="text" name="billing_last_name" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_last_name' ) ); ?>" required>
                         </div>
                     </div>
                     
                     <div>
                         <label class="block text-sm font-bold text-gray-700 mb-1">Email Address *</label>
-                        <input type="email" name="billing_email" class="form-input w-full text-sm" required>
-                        <span class="error-message" id="error-billing_email"></span>
+                        <input type="email" name="billing_email" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_email' ) ); ?>" required>
                     </div>
                     
                     <div>
@@ -1398,9 +1720,8 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <option value="+44">🇬🇧 +44</option>
                                 <option value="+1">🇨🇦 +1</option>
                             </select>
-                            <input type="tel" name="billing_phone" class="form-input phone-number-input text-sm" placeholder="123-456-7890" required>
+                            <input type="tel" name="billing_phone" pattern="[0-9+\-\s()]{7,20}" class="form-input phone-number-input text-sm" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
                         </div>
-                        <span class="error-message" id="error-billing_phone"></span>
                     </div>
                 </div>
                 
@@ -1408,31 +1729,32 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 <div class="space-y-4 mb-6">
                     <div>
                         <label class="block text-sm font-bold text-gray-700 mb-1">Address *</label>
-                        <input type="text" name="billing_address_1" class="form-input w-full text-sm" required>
-                        <span class="error-message" id="error-billing_address_1"></span>
+                        <input type="text" name="billing_address_1" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_address_1' ) ); ?>" required>
                     </div>
                     
                     <div class="grid grid-cols-2 gap-3">
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-1">City *</label>
-                            <input type="text" name="billing_city" class="form-input w-full text-sm" required>
-                            <span class="error-message" id="error-billing_city"></span>
+                            <input type="text" name="billing_city" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_city' ) ); ?>" required>
                         </div>
                         <div>
                             <label class="block text-sm font-bold text-gray-700 mb-1">Postal Code *</label>
-                            <input type="text" name="billing_postcode" class="form-input w-full text-sm" required>
-                            <span class="error-message" id="error-billing_postcode"></span>
+                            <input type="text" name="billing_postcode" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_postcode' ) ); ?>" required>
                         </div>
+                    </div>
+
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-1">State *</label>
+                        <input type="text" name="billing_state" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_state' ) ); ?>" required>
                     </div>
                     
                     <div>
                         <label class="block text-sm font-bold text-gray-700 mb-1">Country *</label>
                         <select name="billing_country" class="form-input w-full text-sm" required>
-                            <option value="US" selected>🇺🇸 United States</option>
-                            <option value="GB">🇬🇧 United Kingdom</option>
-                            <option value="CA">🇨🇦 Canada</option>
+                            <option value="US" <?php selected( $checkout->get_value( 'billing_country' ), 'US' ); ?>>🇺🇸 United States</option>
+                            <option value="GB" <?php selected( $checkout->get_value( 'billing_country' ), 'GB' ); ?>>🇬🇧 United Kingdom</option>
+                            <option value="CA" <?php selected( $checkout->get_value( 'billing_country' ), 'CA' ); ?>>🇨🇦 Canada</option>
                         </select>
-                        <span class="error-message" id="error-billing_country"></span>
                     </div>
                 </div>
                 
@@ -1447,53 +1769,85 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                     </h3>
                     
                     <div class="space-y-3" id="mobile-payment-methods-container">
-                        <!-- Credit Card -->
-                        <div class="mobile-payment-method-wrapper border-2 border-gray-200 rounded-lg overflow-hidden hover:border-trust-green transition-colors selected" data-gateway="stripe">
-                            <label class="flex items-center gap-3 p-3 cursor-pointer">
-                                <input type="radio" name="payment_method" value="stripe" class="w-4 h-4 text-trust-green mobile-payment-method-radio" checked>
-                                <div class="flex items-center gap-2 flex-wrap">
-                                    <span class="text-lg">
-                                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
-                                            <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/>
-                                            <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd"/>
-                                        </svg>
-                                    </span>
-                                    <span class="font-bold text-sm">Credit Card</span>
-                                    <div class="flex gap-1">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-4">
-                                        <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-4">
+                        <?php if (!empty($available_gateways)): ?>
+                            <?php foreach ($available_gateways as $gateway_id => $gateway): ?>
+                            <div class="mobile-payment-method-wrapper border-2 border-gray-200 rounded-lg overflow-hidden hover:border-trust-green transition-colors" data-gateway="<?php echo $gateway_id; ?>">
+                                <label class="flex items-center gap-3 p-3 cursor-pointer">
+                                    <input type="radio" name="payment_method" value="<?php echo $gateway_id; ?>" class="w-4 h-4 text-trust-green mobile-payment-method-radio" <?php checked($gateway_id, WC()->session->get('chosen_payment_method', $gateway_id)); ?>>
+                                    <div class="flex items-center gap-2 flex-wrap">
+                                        <span class="text-lg">
+                                            <?php if ($gateway_id === 'stripe'): ?>
+                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/>
+                                                    <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd"/>
+                                                </svg>
+                                            <?php elseif ($gateway_id === 'paypal'): ?>
+                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h3a1 1 0 100-2H7z"/>
+                                                </svg>
+                                            <?php else: ?>
+                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                    <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
+                                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/>
+                                                </svg>
+                                            <?php endif; ?>
+                                        </span>
+                                        <span class="font-bold text-sm"><?php echo $gateway->get_title(); ?></span>
+                                        <?php if ($gateway_id === 'stripe'): ?>
+                                        <div class="flex gap-1">
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-4">
+                                            <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-4">
+                                        </div>
+                                        <?php elseif ($gateway_id === 'paypal'): ?>
+                                        <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" alt="PayPal" class="h-4">
+                                        <?php endif; ?>
                                     </div>
-                                </div>
-                            </label>
-                            
-                            <!-- Mobile Payment Gateway Form -->
-                            <div class="mobile-payment-form-container" id="mobile-payment-form-stripe" style="display: block;">
-                                <div class="p-3 pt-0 border-t border-gray-200">
-                                    <div class="space-y-3">
-                                        <div>
-                                            <label class="block text-sm font-bold text-gray-700 mb-1">Card Number *</label>
-                                            <input type="text" name="card_number" class="form-input w-full text-sm" placeholder="1234 5678 9012 3456" required>
-                                        </div>
-                                        <div class="grid grid-cols-2 gap-3">
-                                            <div>
-                                                <label class="block text-sm font-bold text-gray-700 mb-1">Expiry *</label>
-                                                <input type="text" name="card_expiry" class="form-input w-full text-sm" placeholder="MM/YY" required>
-                                            </div>
-                                            <div>
-                                                <label class="block text-sm font-bold text-gray-700 mb-1">CVC *</label>
-                                                <input type="text" name="card_cvc" class="form-input w-full text-sm" placeholder="123" required>
-                                            </div>
-                                        </div>
-                                        <div>
-                                            <label class="block text-sm font-bold text-gray-700 mb-1">Cardholder Name *</label>
-                                            <input type="text" name="card_name" class="form-input w-full text-sm" placeholder="John Doe" required>
-                                        </div>
+                                </label>
+                                
+                                <!-- Mobile Payment Gateway Form -->
+                                <div class="mobile-payment-form-container" id="mobile-payment-form-<?php echo $gateway_id; ?>" style="display: none;">
+                                    <div class="p-3 pt-0 border-t border-gray-200">
+                                        <?php
+                                        // Render custom Mollie Components form for credit card
+                                        if (strpos($gateway_id, 'mollie') !== false && strpos($gateway_id, 'creditcard') !== false) {
+                                            echo '<div class="mollie-components">';
+                                            echo '<div id="mobile-cardHolder">';
+                                            echo '<label class="mollie-component-label">Cardholder Name</label>';
+                                            echo '<div class="mollie-component mollie-component--cardHolder"></div>';
+                                            echo '</div>';
+                                            echo '<div id="mobile-cardNumber">';
+                                            echo '<label class="mollie-component-label">Card Number</label>';
+                                            echo '<div class="mollie-component mollie-component--cardNumber"></div>';
+                                            echo '</div>';
+                                            echo '<div id="mobile-expiryDate">';
+                                            echo '<label class="mollie-component-label">Expiry Date</label>';
+                                            echo '<div class="mollie-component mollie-component--expiryDate"></div>';
+                                            echo '</div>';
+                                            echo '<div id="mobile-verificationCode">';
+                                            echo '<label class="mollie-component-label">CVC</label>';
+                                            echo '<div class="mollie-component mollie-component--verificationCode"></div>';
+                                            echo '</div>';
+                                            echo '<input type="hidden" name="cardToken" class="cardToken" />';
+                                            echo '</div>';
+                                        } else {
+                                            // Render the payment form for other gateways
+                                            if ($gateway->has_fields() || $gateway->get_description()) {
+                                                echo '<div class="payment-box payment_method_' . $gateway_id . '">';
+                                                $gateway->payment_fields();
+                                                echo '</div>';
+                                            }
+                                        }
+                                        ?>
                                     </div>
                                 </div>
                             </div>
-                        </div>
+                            <?php endforeach; ?>
+                        <?php else: ?>
+                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                <p class="text-yellow-800 font-medium">No payment methods available. Please configure payment gateways in WooCommerce settings.</p>
+                            </div>
+                        <?php endif; ?>
                     </div>
-                    <span class="error-message" id="error-payment_method"></span>
 
                     <!-- Bank Statement Info for Mobile -->
                     <div class="bank-statement-info">
@@ -1509,49 +1863,54 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 
                 <!-- Hidden field to store selected package -->
                 <input type="hidden" id="selected_package_id" name="selected_package_id" value="">
-            </form>
-
-            <!-- Mobile Submit Button (After Form) -->
-            <div class="mt-6">
-                <div class="text-center mb-4">
-                    <p class="text-base text-convert-red font-bold">
+                
+                <!-- WooCommerce Required Hidden Fields -->
+                <input type="hidden" name="woocommerce-process-checkout" value="1" />
+                <input type="hidden" name="woocommerce-process-checkout-nonce" value="<?php echo wp_create_nonce('woocommerce-process_checkout'); ?>" />
+                <input type="hidden" name="_wp_http_referer" value="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" />
+                
+                <!-- Mobile Submit Button (After Form) -->
+                <div class="mt-6">
+                    <div class="text-center mb-4">
+                        <p class="text-base text-convert-red font-bold">
+                            <svg class="icon icon-sm inline-block" fill="currentColor" viewBox="0 0 20 20">
+                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                            </svg>
+                            Only <span id="mobile-countdown-mini">4:53</span> left to secure your discount
+                        </p>
+                    </div>
+                    
+                    <button type="submit" name="woocommerce_checkout_place_order" id="mobile-submit-btn" class="btn-primary w-full text-white text-lg py-4 mb-4">
                         <svg class="icon icon-sm inline-block" fill="currentColor" viewBox="0 0 20 20">
-                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z" clip-rule="evenodd"/>
+                            <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                         </svg>
-                        Only <span id="mobile-countdown-mini">4:53</span> left to secure your discount
-                    </p>
-                </div>
-                
-                <button onclick="submitCheckoutForm('mobile')" id="mobile-submit-btn" class="btn-primary w-full text-white text-lg py-4 mb-4">
-                    <svg class="icon icon-sm inline-block" fill="currentColor" viewBox="0 0 20 20">
-                        <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                    </svg>
-                    Yes, I Want To Complete My Order
-                </button>
-                
-                <div class="text-center">
-                    <div class="flex items-center justify-center gap-4 flex-wrap text-sm text-gray-600">
-                        <span class="flex items-center gap-1">
-                            <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
-                            </svg>
-                            256-bit SSL Secure
-                        </span>
-                        <span class="flex items-center gap-1">
-                            <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
-                            </svg>
-                            Guaranteed Delivery
-                        </span>
-                        <span class="flex items-center gap-1">
-                            <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
-                                <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
-                            </svg>
-                            <span id="mobile-shipping-guarantee">Free Shipping</span>
-                        </span>
+                        Yes, I Want To Complete My Order
+                    </button>
+                    
+                    <div class="text-center">
+                        <div class="flex items-center justify-center gap-4 flex-wrap text-sm text-gray-600">
+                            <span class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M5 9V7a5 5 0 0110 0v2a2 2 0 012 2v5a2 2 0 01-2 2H5a2 2 0 01-2-2v-5a2 2 0 012-2zm8-2v2H7V7a3 3 0 016 0z" clip-rule="evenodd"/>
+                                </svg>
+                                256-bit SSL Secure
+                            </span>
+                            <span class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
+                                </svg>
+                                Guaranteed Delivery
+                            </span>
+                            <span class="flex items-center gap-1">
+                                <svg class="w-4 h-4 text-trust-green" fill="currentColor" viewBox="0 0 20 20">
+                                    <path fill-rule="evenodd" d="M3 17a1 1 0 011-1h12a1 1 0 110 2H4a1 1 0 01-1-1zm3.293-7.707a1 1 0 011.414 0L9 10.586V3a1 1 0 112 0v7.586l1.293-1.293a1 1 0 111.414 1.414l-3 3a1 1 0 01-1.414 0l-3-3a1 1 0 010-1.414z" clip-rule="evenodd"/>
+                                </svg>
+                                <span id="mobile-shipping-guarantee">Free Shipping</span>
+                            </span>
+                        </div>
                     </div>
                 </div>
-            </div>
+            </form>
         </div>
     </div>
 
@@ -1621,7 +1980,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                             <div class="text-center mb-8">
                                 <div class="product-image-container mx-auto mb-6">
                                     <img 
-                                        src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=300&h=300&fit=crop" 
+                                        src="/wp-content/uploads/2025/07/viagra.jpg" 
                                         alt="Viagra" 
                                         class="w-64 h-64 object-cover"
                                     />
@@ -1632,7 +1991,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                     />
                                 </div>
                                 <h2 id="desktop-product-title" class="text-2xl font-black text-gray-900 mb-3">
-                                    Viagra 50mg
+                                    <?php echo esc_html($current_cart_info['discreet_title'] ?? $hardcoded_fallback_title); ?>
                                 </h2>
                                 <p class="text-gray-600 text-lg font-medium mb-2">
                                     <svg class="icon icon-sm inline-block text-medical-blue" fill="currentColor" viewBox="0 0 20 20">
@@ -1675,19 +2034,19 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <div class="flex justify-between items-center py-3 border-b border-gray-200">
                                     <div class="flex-1">
                                         <h3 class="font-bold text-gray-900" id="cart-item-title">
-                                            Viagra 50mg
+                                            <?php echo esc_html($current_cart_info['discreet_title'] ?? $hardcoded_fallback_title); ?>
                                         </h3>
                                         <p class="text-gray-600 text-base" id="cart-item-quantity">
-                                            Quantity: 1
+                                            Quantity: <?php echo $current_cart_info['quantity'] ?? $hardcoded_fallback_quantity; ?>
                                         </p>
                                         <p class="text-sm text-gray-500" id="cart-item-pills">4 PILLS PER PACK 50mg</p>
                                     </div>
                                     <div class="text-right">
                                         <span class="font-bold text-trust-green text-xl" id="cart-item-total">
-                                            $2.49
+                                            $<?php echo number_format($current_cart_info['price'] ?? $hardcoded_fallback_price, 2); ?>
                                         </span>
                                         <p class="text-sm line-through text-red-500" id="cart-black-market-price">
-                                            Market price: $3.74
+                                            Market price: $<?php echo number_format(calculate_black_market_price($current_cart_info['price'] ?? $hardcoded_fallback_price, $black_market_markup_percentage), 2); ?>
                                         </p>
                                     </div>
                                 </div>
@@ -1697,7 +2056,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                             <div class="space-y-3 mb-8" id="desktop-order-summary">
                                 <div class="flex justify-between items-center">
                                     <span class="font-medium">Subtotal</span>
-                                    <span class="font-bold" id="desktop-subtotal">$2.49</span>
+                                    <span class="font-bold" id="desktop-subtotal">$<?php echo number_format($initial_subtotal, 2); ?></span>
                                 </div>
                                 <div class="flex justify-between items-center" id="desktop-shipping-row">
                                     <span class="font-medium">Shipping</span>
@@ -1707,7 +2066,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <hr class="border-gray-300">
                                 <div class="flex justify-between items-center text-2xl font-black">
                                     <span>Total</span>
-                                    <span class="text-trust-green" id="desktop-total">$2.49</span>
+                                    <span class="text-trust-green" id="desktop-total">$<?php echo number_format($initial_total, 2); ?></span>
                                 </div>
                             </div>
                             
@@ -1747,7 +2106,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                                 <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
                                                 <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/>
                                             </svg>
-                                            Market prices are 50% higher!
+                                            Market prices are <?php echo $black_market_markup_percentage; ?>% higher!
                                         </p>
                                         <p class="text-sm text-yellow-700">
                                             Save money and stay safe with our verified pharmacy
@@ -1862,21 +2221,11 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                         <img src="https://images.unsplash.com/photo-1507003211169-0a1dd7228f2d?w=50&h=50&fit=crop&crop=face" alt="Mark" class="w-12 h-12 rounded-full">
                                         <div>
                                             <div class="flex items-center gap-1 mb-1">
+                                                <?php for($i = 0; $i < 5; $i++): ?>
                                                 <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
                                                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
                                                 </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
+                                                <?php endfor; ?>
                                             </div>
                                             <p class="text-sm font-medium text-gray-500">Mar*** T., 42, Texas</p>
                                         </div>
@@ -1891,21 +2240,11 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                         <img src="https://images.unsplash.com/photo-1472099645785-5658abf4ff4e?w=50&h=50&fit=crop&crop=face" alt="David" class="w-12 h-12 rounded-full">
                                         <div>
                                             <div class="flex items-center gap-1 mb-1">
+                                                <?php for($i = 0; $i < 5; $i++): ?>
                                                 <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
                                                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
                                                 </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
+                                                <?php endfor; ?>
                                             </div>
                                             <p class="text-sm font-medium text-gray-500">Dav*** R., 38, London</p>
                                         </div>
@@ -1920,21 +2259,11 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                         <img src="https://images.unsplash.com/photo-1500648767791-00dcc994a43e?w=50&h=50&fit=crop&crop=face" alt="Michael" class="w-12 h-12 rounded-full">
                                         <div>
                                             <div class="flex items-center gap-1 mb-1">
+                                                <?php for($i = 0; $i < 5; $i++): ?>
                                                 <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
                                                     <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
                                                 </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
-                                                <svg class="w-4 h-4 text-yellow-400 fill-current" viewBox="0 0 20 20">
-                                                    <path d="M9.049 2.927c.3-.921 1.603-.921 1.902 0l1.07 3.292a1 1 0 00.95.69h3.462c.969 0 1.371 1.24.588 1.81l-2.8 2.034a1 1 0 00-.364 1.118l1.07 3.292c.3.921-.755 1.688-1.54 1.118l-2.8-2.034a1 1 0 00-1.175 0l-2.8 2.034c-.784.57-1.838-.197-1.539-1.118l1.07-3.292a1 1 0 00-.364-1.118L2.98 8.72c-.783-.57-.38-1.81.588-1.81h3.461a1 1 0 00.951-.69l1.07-3.292z"/>
-                                                </svg>
+                                                <?php endfor; ?>
                                             </div>
                                             <p class="text-sm font-medium text-gray-500">Mic*** K., 45, Toronto</p>
                                         </div>
@@ -1964,39 +2293,41 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <svg class="icon icon-sm" fill="currentColor" viewBox="0 0 20 20">
                                     <path fill-rule="evenodd" d="M4 2a1 1 0 011 1v2.101a7.002 7.002 0 0111.601 2.566 1 1 0 11-1.885.666A5.002 5.002 0 005.999 7H9a1 1 0 010 2H4a1 1 0 01-1-1V3a1 1 0 011-1zm.008 9.057a1 1 0 011.276.61A5.002 5.002 0 0014.001 13H11a1 1 0 110-2h5a1 1 0 011 1v5a1 1 0 11-2 0v-2.101a7.002 7.002 0 01-11.601-2.566 1 1 0 01.61-1.276z" clip-rule="evenodd"/>
                                 </svg>
-                                Back to Single Price ($2.49)
+                                Back to Single Price ($<?php echo number_format($current_cart_info['price'] ?? $hardcoded_fallback_price, 2); ?>)
                             </button>
                             
-                            <!-- Order Bump 1 -->
-                            <div class="order-bump p-6 bg-white" onclick="selectOrderBump(1)" id="bump-1">
+                            <?php foreach ($order_bump_packages as $bump_id => $package): ?>
+                            <!-- Order Bump <?php echo $bump_id; ?> -->
+                            <div class="order-bump p-6 bg-white" 
+                                 onclick="selectOrderBump(<?php echo $bump_id; ?>)" id="bump-<?php echo $bump_id; ?>">
                                 <div class="flex items-center gap-4">
-                                    <div class="order-bump-radio" id="radio-1"></div>
+                                    <div class="order-bump-radio" id="radio-<?php echo $bump_id; ?>"></div>
                                     <div class="flex-1">
                                         <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
                                             4 PILLS PER PACK 50mg
                                         </div>
                                         <div class="flex items-center gap-3 mb-2">
                                             <h3 class="text-xl font-black text-gray-900">
-                                                2 Packs - Viagra 50mg
+                                                <?php echo $package['title']; ?>
                                             </h3>
-                                            <span class="bg-green-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                POPULAR
+                                            <span class="bg-<?php echo $package['badge_color']; ?> text-white px-2 py-1 rounded-full text-xs font-bold">
+                                                <?php echo $package['badge']; ?>
                                             </span>
                                         </div>
                                         <p class="text-gray-600 text-base font-medium mb-3">
-                                            Perfect for trying out - 8 pills total
+                                            <?php echo $package['description']; ?>
                                         </p>
                                         <div class="flex items-center gap-4 mb-2">
-                                            <span class="text-xl font-black text-trust-green">$4.98</span>
-                                            <span class="text-lg line-through text-gray-400">$4.98</span>
+                                            <span class="text-xl font-black text-trust-green">$<?php echo number_format($package['price'], 2); ?></span>
+                                            <span class="text-lg line-through text-gray-400">$<?php echo number_format($package['original_price'], 2); ?></span>
                                             <span class="bg-convert-red text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                SAVE $0.00
+                                                SAVE $<?php echo number_format($package['savings'], 2); ?>
                                             </span>
                                         </div>
                                         <div class="flex items-center gap-2 mb-2">
                                             <span class="text-sm text-trust-green font-bold">+ FREE SHIPPING</span>
                                             <span class="text-sm text-red-600 font-bold">
-                                                (Market price: $7.47)
+                                                (Market price: $<?php echo number_format($package['black_market_price'], 2); ?>)
                                             </span>
                                         </div>
                                         <div class="mt-2">
@@ -2009,110 +2340,13 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                         </div>
                                     </div>
                                     <img 
-                                        src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=100&h=100&fit=crop" 
-                                        alt="2 Packs" 
-                                        class="w-16 h-16 rounded-lg object-cover border-2 border-green-500"
+                                        src="/wp-content/uploads/2025/07/viagra.jpg" 
+                                        alt="<?php echo $package['quantity']; ?> Packs" 
+                                        class="w-16 h-16 rounded-lg object-cover border-2 border-<?php echo $package['badge_color']; ?>"
                                     />
                                 </div>
                             </div>
-                            
-                            <!-- Order Bump 2 -->
-                            <div class="order-bump p-6 bg-white" onclick="selectOrderBump(2)" id="bump-2">
-                                <div class="flex items-center gap-4">
-                                    <div class="order-bump-radio" id="radio-2"></div>
-                                    <div class="flex-1">
-                                        <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
-                                            4 PILLS PER PACK 50mg
-                                        </div>
-                                        <div class="flex items-center gap-3 mb-2">
-                                            <h3 class="text-xl font-black text-gray-900">
-                                                5 Packs - Viagra 50mg
-                                            </h3>
-                                            <span class="bg-orange-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                BEST VALUE
-                                            </span>
-                                        </div>
-                                        <p class="text-gray-600 text-base font-medium mb-3">
-                                            Most popular choice - 20 pills total
-                                        </p>
-                                        <div class="flex items-center gap-4 mb-2">
-                                            <span class="text-xl font-black text-trust-green">$12.45</span>
-                                            <span class="text-lg line-through text-gray-400">$12.45</span>
-                                            <span class="bg-convert-red text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                SAVE $0.00
-                                            </span>
-                                        </div>
-                                        <div class="flex items-center gap-2 mb-2">
-                                            <span class="text-sm text-trust-green font-bold">+ FREE SHIPPING</span>
-                                            <span class="text-sm text-red-600 font-bold">
-                                                (Market price: $18.70)
-                                            </span>
-                                        </div>
-                                        <div class="mt-2">
-                                            <span class="no-rx-badge">
-                                                <svg class="icon icon-sm" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
-                                                </svg>
-                                                No Prescription Required
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <img 
-                                        src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=100&h=100&fit=crop" 
-                                        alt="5 Packs" 
-                                        class="w-16 h-16 rounded-lg object-cover border-2 border-orange-500"
-                                    />
-                                </div>
-                            </div>
-                            
-                            <!-- Order Bump 3 -->
-                            <div class="order-bump p-6 bg-white" onclick="selectOrderBump(3)" id="bump-3">
-                                <div class="flex items-center gap-4">
-                                    <div class="order-bump-radio" id="radio-3"></div>
-                                    <div class="flex-1">
-                                        <div class="bg-trust-green text-white px-2 py-1 rounded-full text-xs font-bold mb-2 inline-block">
-                                            4 PILLS PER PACK 50mg
-                                        </div>
-                                        <div class="flex items-center gap-3 mb-2">
-                                            <h3 class="text-xl font-black text-gray-900">
-                                                10 Packs - Viagra 50mg
-                                            </h3>
-                                            <span class="bg-purple-500 text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                PREMIUM
-                                            </span>
-                                        </div>
-                                        <p class="text-gray-600 text-base font-medium mb-3">
-                                            Maximum savings - 40 pills total
-                                        </p>
-                                        <div class="flex items-center gap-4 mb-2">
-                                            <span class="text-xl font-black text-trust-green">$24.90</span>
-                                            <span class="text-lg line-through text-gray-400">$24.90</span>
-                                            <span class="bg-convert-red text-white px-2 py-1 rounded-full text-xs font-bold">
-                                                SAVE $0.00
-                                            </span>
-                                        </div>
-                                        <div class="flex items-center gap-2 mb-2">
-                                            <span class="text-sm text-trust-green font-bold">+ FREE SHIPPING</span>
-                                            <span class="text-sm text-red-600 font-bold">
-                                                (Market price: $37.35)
-                                            </span>
-                                        </div>
-                                        <div class="mt-2">
-                                            <span class="no-rx-badge">
-                                                <svg class="icon icon-sm" fill="currentColor" viewBox="0 0 20 20">
-                                                    <path fill-rule="evenodd" d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z" clip-rule="evenodd"/>
-                                                </svg>
-                                                No Prescription Required
-                                            </span>
-                                        </div>
-                                    </div>
-                                    <img 
-                                        src="https://images.unsplash.com/photo-1584308666744-24d5c474f2ae?w=100&h=100&fit=crop" 
-                                        alt="10 Packs" 
-                                        class="w-16 h-16 rounded-lg object-cover border-2 border-purple-500"
-                                    />
-                                </div>
-                            </div>
+                            <?php endforeach; ?>
                         </div>
                         
                         <!-- Trust Badges -->
@@ -2133,6 +2367,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-8">
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-8">
                                 <img src="https://upload.wikimedia.org/wikipedia/commons/b/ba/Stripe_Logo%2C_revised_2016.svg" alt="Stripe" class="h-8">
+                                
                             </div>
                         </div>
                         
@@ -2145,27 +2380,24 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 Billing Information
                             </h3>
                             
-                            <form id="desktop-checkout-form" class="checkout-form" novalidate>
+                            <form name="checkout" method="post" class="checkout woocommerce-checkout" action="<?php echo esc_url( wc_get_checkout_url() ); ?>" enctype="multipart/form-data" novalidate="novalidate">
                                 
                                 <div class="space-y-6">
                                     <!-- Billing Fields -->
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                         <div>
                                             <label class="block text-base font-bold text-gray-700 mb-2">First Name *</label>
-                                            <input type="text" name="billing_first_name" class="form-input w-full" required>
-                                            <span class="error-message" id="error-billing_first_name"></span>
+                                            <input type="text" name="billing_first_name" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_first_name' ) ); ?>" required>
                                         </div>
                                         <div>
                                             <label class="block text-base font-bold text-gray-700 mb-2">Last Name *</label>
-                                            <input type="text" name="billing_last_name" class="form-input w-full" required>
-                                            <span class="error-message" id="error-billing_last_name"></span>
+                                            <input type="text" name="billing_last_name" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_last_name' ) ); ?>" required>
                                         </div>
                                     </div>
                                     
                                     <div>
                                         <label class="block text-base font-bold text-gray-700 mb-2">Email Address *</label>
-                                        <input type="email" name="billing_email" class="form-input w-full" required>
-                                        <span class="error-message" id="error-billing_email"></span>
+                                        <input type="email" name="billing_email" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_email' ) ); ?>" required>
                                     </div>
                                     
                                     <div>
@@ -2176,39 +2408,39 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                                 <option value="+44">🇬🇧 +44</option>
                                                 <option value="+1">🇨🇦 +1</option>
                                             </select>
-                                            <input type="tel" name="billing_phone" class="form-input phone-number-input" placeholder="123-456-7890" required>
+                                            <input type="tel" name="billing_phone" pattern="[0-9+\-\s()]{7,20}" class="form-input phone-number-input" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
                                         </div>
-                                        <span class="error-message" id="error-billing_phone"></span>
                                     </div>
                                     
                                     <div>
                                         <label class="block text-base font-bold text-gray-700 mb-2">Address *</label>
-                                        <input type="text" name="billing_address_1" class="form-input w-full" required>
-                                        <span class="error-message" id="error-billing_address_1"></span>
+                                        <input type="text" name="billing_address_1" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_address_1' ) ); ?>" required>
                                     </div>
                                     
                                     <div class="grid grid-cols-1 sm:grid-cols-2 gap-6">
                                         <div>
                                             <label class="block text-base font-bold text-gray-700 mb-2">City *</label>
-                                            <input type="text" name="billing_city" class="form-input w-full" required>
-                                            <span class="error-message" id="error-billing_city"></span>
+                                            <input type="text" name="billing_city" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_city' ) ); ?>" required>
                                         </div>
                                         <div>
                                             <label class="block text-base font-bold text-gray-700 mb-2">Postal Code *</label>
-                                            <input type="text" name="billing_postcode" class="form-input w-full" required>
-                                            <span class="error-message" id="error-billing_postcode"></span>
+                                            <input type="text" name="billing_postcode" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_postcode' ) ); ?>" required>
                                         </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-base font-bold text-gray-700 mb-2">State *</label>
+                                        <input type="text" name="billing_state" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_state' ) ); ?>" required>
                                     </div>
                                     
                                     <!-- Country Field -->
                                     <div>
                                         <label class="block text-base font-bold text-gray-700 mb-2">Country *</label>
                                         <select name="billing_country" class="form-input w-full" required>
-                                            <option value="US" selected>🇺🇸 United States</option>
-                                            <option value="GB">🇬🇧 United Kingdom</option>
-                                            <option value="CA">🇨🇦 Canada</option>
+                                            <option value="US" <?php selected( $checkout->get_value( 'billing_country' ), 'US' ); ?>>🇺🇸 United States</option>
+                                            <option value="GB" <?php selected( $checkout->get_value( 'billing_country' ), 'GB' ); ?>>🇬🇧 United Kingdom</option>
+                                            <option value="CA" <?php selected( $checkout->get_value( 'billing_country' ), 'CA' ); ?>>🇨🇦 Canada</option>
                                         </select>
-                                        <span class="error-message" id="error-billing_country"></span>
                                     </div>
                                 </div>
                                 
@@ -2223,53 +2455,85 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                     </h3>
                                     
                                     <div class="space-y-6" id="payment-methods-container">
-                                        <!-- Credit Card -->
-                                        <div class="payment-method-wrapper border-2 border-gray-200 rounded-xl overflow-hidden hover:border-trust-green transition-colors selected" data-gateway="stripe">
-                                            <label class="flex items-center gap-4 p-6 cursor-pointer">
-                                                <input type="radio" name="payment_method" value="stripe" class="w-5 h-5 text-trust-green payment-method-radio" checked>
-                                                <div class="flex items-center gap-4 flex-wrap">
-                                                    <span class="text-xl">
-                                                        <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
-                                                            <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/>
-                                                            <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd"/>
-                                                        </svg>
-                                                    </span>
-                                                    <span class="font-bold text-lg">Credit Card</span>
-                                                    <div class="flex gap-3">
-                                                        <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-6">
-                                                        <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-6">
+                                        <?php if (!empty($available_gateways)): ?>
+                                            <?php foreach ($available_gateways as $gateway_id => $gateway): ?>
+                                            <div class="payment-method-wrapper border-2 border-gray-200 rounded-xl overflow-hidden hover:border-trust-green transition-colors" data-gateway="<?php echo $gateway_id; ?>">
+                                                <label class="flex items-center gap-4 p-6 cursor-pointer">
+                                                    <input type="radio" name="payment_method" value="<?php echo $gateway_id; ?>" class="w-5 h-5 text-trust-green payment-method-radio" <?php checked($gateway_id, WC()->session->get('chosen_payment_method', $gateway_id)); ?>>
+                                                    <div class="flex items-center gap-4 flex-wrap">
+                                                        <span class="text-xl">
+                                                            <?php if ($gateway_id === 'stripe'): ?>
+                                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path d="M4 4a2 2 0 00-2 2v1h16V6a2 2 0 00-2-2H4z"/>
+                                                                    <path fill-rule="evenodd" d="M18 9H2v5a2 2 0 002 2h12a2 2 0 002-2V9zM4 13a1 1 0 011-1h1a1 1 0 110 2H5a1 1 0 01-1-1zm5-1a1 1 0 100 2h1a1 1 0 100-2H9z" clip-rule="evenodd"/>
+                                                                </svg>
+                                                            <?php elseif ($gateway_id === 'paypal'): ?>
+                                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path d="M4 4a2 2 0 00-2 2v8a2 2 0 002 2h12a2 2 0 002-2V6a2 2 0 00-2-2H4zm2 6a1 1 0 011-1h6a1 1 0 110 2H7a1 1 0 01-1-1zm1 3a1 1 0 100 2h3a1 1 0 100-2H7z"/>
+                                                                </svg>
+                                                            <?php else: ?>
+                                                                <svg class="icon" fill="currentColor" viewBox="0 0 20 20">
+                                                                    <path d="M8.433 7.418c.155-.103.346-.196.567-.267v1.698a2.305 2.305 0 01-.567-.267C8.07 8.34 8 8.114 8 8c0-.114.07-.34.433-.582zM11 12.849v-1.698c.22.071.412.164.567.267.364.243.433.468.433.582 0 .114-.07.34-.433.582a2.305 2.305 0 01-.567.267z"/>
+                                                                    <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-13a1 1 0 10-2 0v.092a4.535 4.535 0 00-1.676.662C6.602 6.234 6 7.009 6 8c0 .99.602 1.765 1.324 2.246.48.32 1.054.545 1.676.662v1.941c-.391-.127-.68-.317-.843-.504a1 1 0 10-1.51 1.31c.562.649 1.413 1.076 2.353 1.253V15a1 1 0 102 0v-.092a4.535 4.535 0 001.676-.662C13.398 13.766 14 12.991 14 12c0-.99-.602-1.765-1.324-2.246A4.535 4.535 0 0011 9.092V7.151c.391.127.68.317.843.504a1 1 0 101.511-1.31c-.563-.649-1.413-1.076-2.354-1.253V5z" clip-rule="evenodd"/>
+                                                                </svg>
+                                                            <?php endif; ?>
+                                                        </span>
+                                                        <span class="font-bold text-lg"><?php echo $gateway->get_title(); ?></span>
+                                                        <?php if ($gateway_id === 'stripe'): ?>
+                                                        <div class="flex gap-3">
+                                                            <img src="https://upload.wikimedia.org/wikipedia/commons/5/5e/Visa_Inc._logo.svg" alt="Visa" class="h-6">
+                                                            <img src="https://upload.wikimedia.org/wikipedia/commons/2/2a/Mastercard-logo.svg" alt="Mastercard" class="h-6">
+                                                        </div>
+                                                        <?php elseif ($gateway_id === 'paypal'): ?>
+                                                        <img src="https://upload.wikimedia.org/wikipedia/commons/b/b5/PayPal.svg" alt="PayPal" class="h-6">
+                                                        <?php endif; ?>
                                                     </div>
-                                                </div>
-                                            </label>
-                                            
-                                            <!-- Payment Gateway Form -->
-                                            <div class="payment-form-container" id="payment-form-stripe" style="display: block;">
-                                                <div class="p-6 pt-0 border-t border-gray-200">
-                                                    <div class="space-y-4">
-                                                        <div>
-                                                            <label class="block text-base font-bold text-gray-700 mb-2">Card Number *</label>
-                                                            <input type="text" name="card_number" class="form-input w-full" placeholder="1234 5678 9012 3456" required>
-                                                        </div>
-                                                        <div class="grid grid-cols-2 gap-4">
-                                                            <div>
-                                                                <label class="block text-base font-bold text-gray-700 mb-2">Expiry Date *</label>
-                                                                <input type="text" name="card_expiry" class="form-input w-full" placeholder="MM/YY" required>
-                                                            </div>
-                                                            <div>
-                                                                <label class="block text-base font-bold text-gray-700 mb-2">CVC *</label>
-                                                                <input type="text" name="card_cvc" class="form-input w-full" placeholder="123" required>
-                                                            </div>
-                                                        </div>
-                                                        <div>
-                                                            <label class="block text-base font-bold text-gray-700 mb-2">Cardholder Name *</label>
-                                                            <input type="text" name="card_name" class="form-input w-full" placeholder="John Doe" required>
-                                                        </div>
+                                                </label>
+                                                
+                                                <!-- Payment Gateway Form -->
+                                                <div class="payment-form-container" id="payment-form-<?php echo $gateway_id; ?>" style="display: none;">
+                                                    <div class="p-6 pt-0 border-t border-gray-200">
+                                                        <?php
+                                                        // Render custom Mollie Components form for credit card
+                                                        if (strpos($gateway_id, 'mollie') !== false && strpos($gateway_id, 'creditcard') !== false) {
+                                                            echo '<div class="mollie-components">';
+                                                            echo '<div id="cardHolder">';
+                                                            echo '<label class="mollie-component-label">Cardholder Name</label>';
+                                                            echo '<div class="mollie-component mollie-component--cardHolder"></div>';
+                                                            echo '</div>';
+                                                            echo '<div id="cardNumber">';
+                                                            echo '<label class="mollie-component-label">Card Number</label>';
+                                                            echo '<div class="mollie-component mollie-component--cardNumber"></div>';
+                                                            echo '</div>';
+                                                            echo '<div id="expiryDate">';
+                                                            echo '<label class="mollie-component-label">Expiry Date</label>';
+                                                            echo '<div class="mollie-component mollie-component--expiryDate"></div>';
+                                                            echo '</div>';
+                                                            echo '<div id="verificationCode">';
+                                                            echo '<label class="mollie-component-label">CVC</label>';
+                                                            echo '<div class="mollie-component mollie-component--verificationCode"></div>';
+                                                            echo '</div>';
+                                                            echo '<input type="hidden" name="cardToken" class="cardToken" />';
+                                                            echo '</div>';
+                                                        } else {
+                                                            // Render the payment form for other gateways
+                                                            if ($gateway->has_fields() || $gateway->get_description()) {
+                                                                echo '<div class="payment-box payment_method_' . $gateway_id . '">';
+                                                                $gateway->payment_fields();
+                                                                echo '</div>';
+                                                            }
+                                                        }
+                                                        ?>
                                                     </div>
                                                 </div>
                                             </div>
-                                        </div>
+                                            <?php endforeach; ?>
+                                        <?php else: ?>
+                                            <div class="bg-yellow-50 border border-yellow-200 rounded-lg p-4">
+                                                <p class="text-yellow-800 font-medium">No payment methods available. Please configure payment gateways in WooCommerce settings.</p>
+                                            </div>
+                                        <?php endif; ?>
                                     </div>
-                                    <span class="error-message" id="error-payment_method"></span>
 
                                     <!-- Bank Statement Info for Desktop -->
                                     <div class="bank-statement-info">
@@ -2282,6 +2546,18 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                         <p>This charge will appear as "<strong>VHealthLLC</strong>" on your statement for complete discretion and privacy.</p>
                                     </div>
                                 </div>
+                                
+                                <!-- Terms and Conditions -->
+                                <?php if (wc_get_page_id('terms') > 0): ?>
+                                <div class="mt-8">
+                                    <label class="flex items-start gap-4 cursor-pointer">
+                                        <input type="checkbox" name="terms" class="w-5 h-5 text-trust-green rounded mt-1" required>
+                                        <span class="text-base text-gray-700">
+                                            I agree to the <a href="<?php echo get_permalink(wc_get_page_id('terms')); ?>" class="text-trust-green underline" target="_blank">Terms & Conditions</a>
+                                        </span>
+                                    </label>
+                                </div>
+                                <?php endif; ?>
                                 
                                 <!-- Countdown Near Button -->
                                 <div class="text-center mt-8 mb-6">
@@ -2296,8 +2572,13 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                                 <!-- Hidden field to store selected package -->
                                 <input type="hidden" id="selected_package_id" name="selected_package_id" value="">
                                 
+                                <!-- WooCommerce Required Hidden Fields -->
+                                <input type="hidden" name="woocommerce-process-checkout" value="1" />
+                                <input type="hidden" name="woocommerce-process-checkout-nonce" value="<?php echo wp_create_nonce('woocommerce-process_checkout'); ?>" />
+                                <input type="hidden" name="_wp_http_referer" value="<?php echo esc_url( $_SERVER['REQUEST_URI'] ); ?>" />
+                                
                                 <!-- Main CTA Button -->
-                                <button type="button" onclick="submitCheckoutForm('desktop')" id="desktop-submit-btn" class="btn-primary w-full text-white text-xl py-6 mb-8">
+                                <button type="submit" name="woocommerce_checkout_place_order" id="desktop-submit-btn" class="btn-primary w-full text-white text-xl py-6 mb-8">
                                     <svg class="icon icon-sm inline-block" fill="currentColor" viewBox="0 0 20 20">
                                         <path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/>
                                     </svg>
@@ -2336,48 +2617,129 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
     </div>
 
     <script>
-        // Mock data for prototype
-        const orderBumpPackages = {
-            1: {
-                title: '2 Packs - Viagra 50mg',
-                discreet_title: 'Viagra 50mg',
-                quantity: 2,
-                pills_total: 8,
-                price: 4.98,
-                black_market_price: 7.47,
-                badge: 'POPULAR',
-                badge_color: 'green-500'
-            },
-            2: {
-                title: '5 Packs - Viagra 50mg',
-                discreet_title: 'Viagra 50mg',
-                quantity: 5,
-                pills_total: 20,
-                price: 12.45,
-                black_market_price: 18.70,
-                badge: 'BEST VALUE',
-                badge_color: 'orange-500'
-            },
-            3: {
-                title: '10 Packs - Viagra 50mg',
-                discreet_title: 'Viagra 50mg',
-                quantity: 10,
-                pills_total: 40,
-                price: 24.90,
-                black_market_price: 37.35,
-                badge: 'PREMIUM',
-                badge_color: 'purple-500'
+        // PHP data for JavaScript - ALL FREE SHIPPING
+        const shippingCost = 0.00; // FREE SHIPPING
+        const orderBumpPackages = <?php echo json_encode($order_bump_packages); ?>;
+        const currentCartInfo = <?php echo json_encode($current_cart_info); ?>;
+        const initialSubtotal = <?php echo $initial_subtotal; ?>;
+        const initialShipping = 0.00; // FREE SHIPPING
+        const initialTotal = <?php echo $initial_total; ?>;
+        const blackMarketMarkupPercentage = <?php echo $black_market_markup_percentage; ?>; // Dynamic markup percentage
+        const hardcodedFallbackPrice = <?php echo $hardcoded_fallback_price; ?>; // Hardcoded fallback price
+        const isFromFunnel = <?php echo $is_from_funnel ? 'true' : 'false'; ?>; // Track if user came from funnel
+        
+        console.log('Shipping Cost:', shippingCost);
+        console.log('Order Bump Packages:', orderBumpPackages);
+        console.log('Current Cart Info:', currentCartInfo);
+        console.log('Black Market Markup:', blackMarketMarkupPercentage + '%');
+        console.log('Hardcoded Fallback Price:', hardcodedFallbackPrice);
+        console.log('Is From Funnel:', isFromFunnel);
+
+        let selectedPackageId = null; // Start with no package selected
+        let isOrderBumpSelected = false; // Track if order bump is selected
+        let mollieInstance = null; // Store Mollie instance
+        let mollieComponents = {}; // Store Mollie components
+
+        // Initialize Mollie Components - COMPLETELY REWRITTEN
+        function initializeMollieComponents() {
+            // Get Mollie profile ID - replace with your actual profile ID
+            const mollieProfileId = 'pfl_Wtrwpe7ck9'; // Replace with your actual profile ID
+            
+            // Destroy existing instance completely
+            if (mollieInstance) {
+                try {
+                    // Unmount all existing components
+                    Object.keys(mollieComponents).forEach(key => {
+                        if (mollieComponents[key] && typeof mollieComponents[key].unmount === 'function') {
+                            try {
+                                mollieComponents[key].unmount();
+                            } catch (e) {
+                                console.log('Component unmount error:', e);
+                            }
+                        }
+                    });
+                } catch (e) {
+                    console.log('Error during cleanup:', e);
+                }
+                mollieComponents = {};
+                mollieInstance = null;
             }
-        };
 
-        const currentCartInfo = {
-            discreet_title: 'Viagra 50mg',
-            quantity: 1,
-            price: 2.49
-        };
+            try {
+                // Create new Mollie instance
+                mollieInstance = Mollie(mollieProfileId, {
+                    locale: 'en_US',
+                    testmode: true // Set to false for production
+                });
 
-        let selectedPackageId = null;
-        let isOrderBumpSelected = false;
+                // Check which components need to be mounted
+                const desktopContainer = document.querySelector('#cardHolder .mollie-component--cardHolder');
+                const mobileContainer = document.querySelector('#mobile-cardHolder .mollie-component--cardHolder');
+
+                // Desktop components - only if container exists and is visible
+                if (desktopContainer && desktopContainer.offsetParent !== null) {
+                    console.log('Mounting desktop Mollie components');
+                    
+                    mollieComponents.cardHolder = mollieInstance.createComponent('cardHolder');
+                    mollieComponents.cardHolder.mount('#cardHolder .mollie-component--cardHolder');
+
+                    mollieComponents.cardNumber = mollieInstance.createComponent('cardNumber');
+                    mollieComponents.cardNumber.mount('#cardNumber .mollie-component--cardNumber');
+
+                    mollieComponents.expiryDate = mollieInstance.createComponent('expiryDate');
+                    mollieComponents.expiryDate.mount('#expiryDate .mollie-component--expiryDate');
+
+                    mollieComponents.verificationCode = mollieInstance.createComponent('verificationCode');
+                    mollieComponents.verificationCode.mount('#verificationCode .mollie-component--verificationCode');
+                }
+
+                // Mobile components - only if container exists and is visible
+                if (mobileContainer && mobileContainer.offsetParent !== null) {
+                    console.log('Mounting mobile Mollie components');
+                    
+                    // Use different component instances for mobile
+                    mollieComponents.mobileCardHolder = mollieInstance.createComponent('cardHolder');
+                    mollieComponents.mobileCardHolder.mount('#mobile-cardHolder .mollie-component--cardHolder');
+
+                    mollieComponents.mobileCardNumber = mollieInstance.createComponent('cardNumber');
+                    mollieComponents.mobileCardNumber.mount('#mobile-cardNumber .mollie-component--cardNumber');
+
+                    mollieComponents.mobileExpiryDate = mollieInstance.createComponent('expiryDate');
+                    mollieComponents.mobileExpiryDate.mount('#mobile-expiryDate .mollie-component--expiryDate');
+
+                    mollieComponents.mobileVerificationCode = mollieInstance.createComponent('verificationCode');
+                    mollieComponents.mobileVerificationCode.mount('#mobile-verificationCode .mollie-component--verificationCode');
+                }
+
+                console.log('Mollie Components initialized successfully');
+                console.log('Active components:', Object.keys(mollieComponents));
+
+                // Add error handlers
+                addMollieComponentErrorHandlers();
+            } catch (error) {
+                console.error('Error initializing Mollie Components:', error);
+            }
+        }
+
+        function addMollieComponentErrorHandlers() {
+            Object.keys(mollieComponents).forEach(key => {
+                const component = mollieComponents[key];
+                if (component && typeof component.addEventListener === 'function') {
+                    component.addEventListener('change', event => {
+                        const errorElement = document.querySelector(`#${key.replace('mobile', '').replace('Mobile', '').toLowerCase()}-error`);
+                        if (errorElement) {
+                            if (event.error && event.touched) {
+                                errorElement.textContent = event.error;
+                                errorElement.style.display = 'block';
+                            } else {
+                                errorElement.textContent = '';
+                                errorElement.style.display = 'none';
+                            }
+                        }
+                    });
+                }
+            });
+        }
 
         // Video reviews data with masked names
         const videoReviews = [
@@ -2393,7 +2755,6 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         // Video popup functions
         function showVideoPopup() {
             const popup = document.getElementById('videoPopup');
-            popup.style.display = 'flex';
             popup.classList.add('show');
             updateVideoDisplay();
         }
@@ -2401,9 +2762,6 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         function closeVideoPopup() {
             const popup = document.getElementById('videoPopup');
             popup.classList.remove('show');
-            setTimeout(() => {
-                popup.style.display = 'none';
-            }, 300);
         }
 
         function nextVideo() {
@@ -2458,6 +2816,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         let notificationTimeout;
 
         function getRandomNotification() {
+            // If all notifications have been used, reset the set
             if (usedNotifications.size >= purchaseNotifications.length) {
                 usedNotifications.clear();
             }
@@ -2466,6 +2825,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             let randomIndex = Math.floor(Math.random() * availableNotifications.length);
             let selectedNotification = availableNotifications[randomIndex];
             
+            // Mark this notification as used
             let originalIndex = purchaseNotifications.indexOf(selectedNotification);
             usedNotifications.add(originalIndex);
             
@@ -2480,6 +2840,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             if (notification && textElement && timeElement) {
                 const randomNotification = getRandomNotification();
                 
+                // Generate random time between 1-8 minutes ago
                 const randomMinutes = Math.floor(Math.random() * 8) + 1;
                 const timeText = randomMinutes === 1 ? "1 minute ago" : `${randomMinutes} minutes ago`;
                 
@@ -2488,6 +2849,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
                 
                 notification.classList.add('show');
                 
+                // Auto-hide after 5 seconds
                 clearTimeout(notificationTimeout);
                 notificationTimeout = setTimeout(() => {
                     notification.classList.remove('show');
@@ -2501,18 +2863,28 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             clearTimeout(notificationTimeout);
         }
 
+        // Show notifications every 12-20 seconds
+        setInterval(() => {
+            if (Math.random() > 0.2) { // 80% chance to show
+                showPurchaseNotification();
+            }
+        }, Math.random() * 8000 + 12000); // Random between 12-20 seconds
+
         // Desktop order bump selection
         function selectOrderBump(packageId) {
             console.log('Selecting order bump:', packageId);
             
+            // Remove selected class from all bumps
             document.querySelectorAll('.order-bump').forEach(bump => {
                 bump.classList.remove('selected');
             });
             
+            // Remove checked class from all radios
             document.querySelectorAll('.order-bump-radio').forEach(radio => {
                 radio.classList.remove('checked');
             });
             
+            // Add selected class to clicked bump
             const selectedBump = document.getElementById(`bump-${packageId}`);
             const selectedRadio = document.getElementById(`radio-${packageId}`);
             
@@ -2524,12 +2896,16 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             selectedPackageId = packageId;
             isOrderBumpSelected = true;
             
+            // Update hidden field
             const hiddenFields = document.querySelectorAll('#selected_package_id');
             hiddenFields.forEach(field => {
                 field.value = packageId;
             });
             
+            // Update product display with order bump
             updateProductDisplay(packageId);
+
+            // Show reset button
             showResetButton();
         }
 
@@ -2537,32 +2913,41 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         function selectMobilePackage(packageId, title, price) {
             console.log('Selecting mobile package:', packageId, title, price);
             
+            // Remove selected class from all packages
             document.querySelectorAll('.mobile-package-card').forEach(card => {
                 card.classList.remove('selected');
             });
             
+            // Add selected to clicked package
             event.target.closest('.mobile-package-card').classList.add('selected');
             
             selectedPackageId = packageId;
             isOrderBumpSelected = true;
             
+            // Update hidden field
             const hiddenFields = document.querySelectorAll('#selected_package_id');
             hiddenFields.forEach(field => {
                 field.value = packageId;
             });
             
+            // Update mobile product info with discreet naming
             const mobileTitle = document.getElementById('mobile-product-title');
             const mobilePrice = document.getElementById('mobile-product-price');
             const mobileBlackMarketPrice = document.getElementById('mobile-black-market-price');
+            const mobileShippingBadge = document.getElementById('mobile-shipping-badge');
             
             const package = orderBumpPackages[packageId];
             if (package) {
                 if (mobileTitle) mobileTitle.textContent = package.discreet_title;
                 if (mobilePrice) mobilePrice.textContent = `$${package.price.toFixed(2)}`;
                 if (mobileBlackMarketPrice) mobileBlackMarketPrice.textContent = `$${package.black_market_price.toFixed(2)}`;
+                if (mobileShippingBadge) mobileShippingBadge.textContent = 'FREE SHIPPING';
             }
             
+            // Update desktop display too
             updateProductDisplay(packageId);
+
+            // Show reset button
             showResetButton();
         }
 
@@ -2584,7 +2969,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             if (desktopResetBtn) desktopResetBtn.style.display = 'none';
         }
 
-        // Update product display with package information
+        // Update product display with package information using discreet naming
         function updateProductDisplay(packageId) {
             const package = orderBumpPackages[packageId];
             if (!package) {
@@ -2594,16 +2979,19 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             
             console.log('Updating display with package:', package);
             
+            // Update desktop product title with discreet name
             const desktopTitle = document.getElementById('desktop-product-title');
             if (desktopTitle) {
                 desktopTitle.textContent = package.discreet_title;
             }
 
+            // Update pills info
             const desktopPillsInfo = document.getElementById('desktop-pills-info');
             if (desktopPillsInfo) {
                 desktopPillsInfo.textContent = `${package.pills_total} pills total (4 PILLS PER PACK 50mg)`;
             }
             
+            // Update cart item details with discreet naming
             const cartItemTitle = document.getElementById('cart-item-title');
             const cartItemQuantity = document.getElementById('cart-item-quantity');
             const cartItemTotal = document.getElementById('cart-item-total');
@@ -2616,6 +3004,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             if (cartItemPills) cartItemPills.textContent = `${package.pills_total} pills total`;
             if (cartBlackMarketPrice) cartBlackMarketPrice.textContent = `Market price: $${package.black_market_price.toFixed(2)}`;
             
+            // Update order summary with FREE shipping
             const subtotalElement = document.getElementById('desktop-subtotal');
             const shippingElement = document.getElementById('desktop-shipping-cost');
             const totalElement = document.getElementById('desktop-total');
@@ -2630,44 +3019,53 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
         }
 
-        // Reset to original cart display
+        // Reset to original cart display with discreet naming
         function resetToOriginalCart() {
             console.log('Resetting to original cart');
             
+            // Clear all selections
             selectedPackageId = null;
             isOrderBumpSelected = false;
             
+            // Clear hidden fields
             const hiddenFields = document.querySelectorAll('#selected_package_id');
             hiddenFields.forEach(field => {
                 field.value = '';
             });
             
+            // Remove selected class from all bumps
             document.querySelectorAll('.order-bump').forEach(bump => {
                 bump.classList.remove('selected');
             });
             
+            // Remove checked class from all radios
             document.querySelectorAll('.order-bump-radio').forEach(radio => {
                 radio.classList.remove('checked');
             });
             
+            // Remove selected class from all mobile packages
             document.querySelectorAll('.mobile-package-card').forEach(card => {
                 card.classList.remove('selected');
             });
             
+            // Hide reset button
             hideResetButton();
             
             if (!currentCartInfo || !currentCartInfo.discreet_title) return;
             
+            // Update desktop product title with discreet name
             const desktopTitle = document.getElementById('desktop-product-title');
             if (desktopTitle) {
                 desktopTitle.textContent = currentCartInfo.discreet_title;
             }
 
+            // Update pills info
             const desktopPillsInfo = document.getElementById('desktop-pills-info');
             if (desktopPillsInfo) {
                 desktopPillsInfo.textContent = '4 PILLS PER PACK 50mg';
             }
             
+            // Update cart item details with discreet naming
             const cartItemTitle = document.getElementById('cart-item-title');
             const cartItemQuantity = document.getElementById('cart-item-quantity');
             const cartItemTotal = document.getElementById('cart-item-total');
@@ -2676,54 +3074,34 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             
             if (cartItemTitle) cartItemTitle.textContent = currentCartInfo.discreet_title;
             if (cartItemQuantity) cartItemQuantity.textContent = `Quantity: ${currentCartInfo.quantity}`;
-            if (cartItemTotal) cartItemTotal.textContent = `$${currentCartInfo.price.toFixed(2)}`;
+            if (cartItemTotal) cartItemTotal.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (cartItemPills) cartItemPills.textContent = '4 PILLS PER PACK 50mg';
-            if (cartBlackMarketPrice) cartBlackMarketPrice.textContent = `Market price: $${(currentCartInfo.price * 1.5).toFixed(2)}`;
+            if (cartBlackMarketPrice) cartBlackMarketPrice.textContent = `Market price: $${(initialSubtotal * (1 + blackMarketMarkupPercentage/100)).toFixed(2)}`;
             
+            // Update order summary with FREE shipping
             const subtotalElement = document.getElementById('desktop-subtotal');
             const shippingElement = document.getElementById('desktop-shipping-cost');
             const totalElement = document.getElementById('desktop-total');
             const shippingGuarantee = document.getElementById('desktop-shipping-guarantee');
             
-            if (subtotalElement) subtotalElement.textContent = `$${currentCartInfo.price.toFixed(2)}`;
+            if (subtotalElement) subtotalElement.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (shippingElement) {
                 shippingElement.textContent = 'FREE';
                 shippingElement.classList.add('text-trust-green');
             }
-            if (totalElement) totalElement.textContent = `$${currentCartInfo.price.toFixed(2)}`;
+            if (totalElement) totalElement.textContent = `$${initialTotal.toFixed(2)}`;
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
             
+            // Update mobile display with discreet naming
             const mobileTitle = document.getElementById('mobile-product-title');
             const mobilePrice = document.getElementById('mobile-product-price');
             const mobileBlackMarketPrice = document.getElementById('mobile-black-market-price');
+            const mobileShippingBadge = document.getElementById('mobile-shipping-badge');
             
             if (mobileTitle) mobileTitle.textContent = currentCartInfo.discreet_title;
-            if (mobilePrice) mobilePrice.textContent = `$${currentCartInfo.price.toFixed(2)}`;
-            if (mobileBlackMarketPrice) mobileBlackMarketPrice.textContent = `$${(currentCartInfo.price * 1.5).toFixed(2)}`;
-        }
-
-        // Submit checkout form (prototype - just shows alert)
-        function submitCheckoutForm(source) {
-            console.log('Submitting checkout form from:', source);
-            
-            const loadingOverlay = document.getElementById('loadingOverlay');
-            const submitButtons = document.querySelectorAll('#mobile-submit-btn, #desktop-submit-btn');
-            
-            loadingOverlay.classList.add('active');
-            submitButtons.forEach(btn => {
-                btn.disabled = true;
-                btn.innerHTML = '⏳ Processing Your Order...';
-            });
-            
-            // Simulate processing
-            setTimeout(() => {
-                loadingOverlay.classList.remove('active');
-                submitButtons.forEach(btn => {
-                    btn.disabled = false;
-                    btn.innerHTML = '<svg class="icon icon-sm inline-block" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg> Yes, I Want To Complete My Order';
-                });
-                alert('This is a prototype! In a real implementation, this would process the order.');
-            }, 2000);
+            if (mobilePrice) mobilePrice.textContent = `$${initialSubtotal.toFixed(2)}`;
+            if (mobileBlackMarketPrice) mobileBlackMarketPrice.textContent = `$${(initialSubtotal * (1 + blackMarketMarkupPercentage/100)).toFixed(2)}`;
+            if (mobileShippingBadge) mobileShippingBadge.textContent = 'FREE SHIPPING';
         }
 
         // Countdown timer
@@ -2762,36 +3140,227 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
         // Form validation and enhancement
         function enhanceForm() {
             const inputs = document.querySelectorAll('.form-input');
-            
+
+            function validateField(field) {
+                let valid = true;
+                if (field.name === 'billing_phone') {
+                    const phonePattern = /^[0-9+\-\s()]{7,20}$/;
+                    valid = phonePattern.test(field.value.trim());
+                } else {
+                    valid = field.checkValidity();
+                }
+
+                if (valid) {
+                    field.classList.remove('error');
+                    field.classList.add('valid');
+                    const err = field.parentNode.querySelector('.error-message');
+                    if (err) err.style.display = 'none';
+                } else {
+                    field.classList.remove('valid');
+                    field.classList.add('error');
+                    let err = field.parentNode.querySelector('.error-message');
+                    if (!err) {
+                        err = document.createElement('span');
+                        err.className = 'error-message';
+                        field.parentNode.appendChild(err);
+                    }
+                    err.textContent = field.name === 'billing_phone' ? 'Please enter a valid phone number.' : 'This field is required';
+                    err.style.display = 'block';
+                }
+                return valid;
+            }
+
             inputs.forEach(input => {
                 input.addEventListener('focus', function() {
                     this.style.borderColor = '#3CB371';
                     this.style.boxShadow = '0 0 0 3px rgba(60, 179, 113, 0.1)';
                     this.classList.remove('error');
                 });
-                
+
                 input.addEventListener('blur', function() {
                     if (!this.value) {
                         this.style.borderColor = '#e2e8f0';
                         this.style.boxShadow = 'none';
                     }
+                    validateField(this);
+                });
+
+                input.addEventListener('input', function() {
+                    validateField(this);
                 });
             });
         }
 
-        // Show notifications every 12-20 seconds
-        setInterval(() => {
-            if (Math.random() > 0.2) { // 80% chance to show
-                showPurchaseNotification();
+        // Initialize payment method functionality
+        function initPaymentMethods() {
+            // Desktop payment methods
+            const desktopRadios = document.querySelectorAll('.payment-method-radio');
+            desktopRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    handlePaymentMethodChange(this.value, 'desktop');
+                });
+            });
+            
+            // Mobile payment methods
+            const mobileRadios = document.querySelectorAll('.mobile-payment-method-radio');
+            mobileRadios.forEach(radio => {
+                radio.addEventListener('change', function() {
+                    handlePaymentMethodChange(this.value, 'mobile');
+                });
+            });
+            
+            // Show form for initially selected payment method
+            const selectedDesktop = document.querySelector('.payment-method-radio:checked');
+            if (selectedDesktop) {
+                handlePaymentMethodChange(selectedDesktop.value, 'desktop');
             }
-        }, Math.random() * 8000 + 12000); // Random between 12-20 seconds
+            
+            const selectedMobile = document.querySelector('.mobile-payment-method-radio:checked');
+            if (selectedMobile) {
+                handlePaymentMethodChange(selectedMobile.value, 'mobile');
+            }
+        }
+        
+        // Handle payment method change
+        function handlePaymentMethodChange(selectedGateway, device) {
+            console.log('Payment method changed:', selectedGateway, device);
+
+            // Always clear existing Mollie components when changing payment methods
+            if (mollieInstance && Object.keys(mollieComponents).length > 0) {
+                Object.keys(mollieComponents).forEach(key => {
+                    if (mollieComponents[key] && typeof mollieComponents[key].unmount === 'function') {
+                        try {
+                            mollieComponents[key].unmount();
+                        } catch (e) {
+                            console.log('Component unmount error:', e);
+                        }
+                    }
+                });
+                mollieComponents = {};
+            }
+            
+            if (device === 'desktop') {
+                // Hide all desktop payment forms
+                document.querySelectorAll('.payment-form-container').forEach(container => {
+                    container.style.display = 'none';
+                });
+                
+                // Remove selected class from all wrappers
+                document.querySelectorAll('.payment-method-wrapper').forEach(wrapper => {
+                    wrapper.classList.remove('selected');
+                });
+                
+                // Show selected payment form
+                const selectedForm = document.getElementById(`payment-form-${selectedGateway}`);
+                const selectedWrapper = document.querySelector(`[data-gateway="${selectedGateway}"]`);
+                
+                if (selectedForm) {
+                    selectedForm.style.display = 'block';
+                }
+                
+                if (selectedWrapper) {
+                    selectedWrapper.classList.add('selected');
+                }
+            } else {
+                // Hide all mobile payment forms
+                document.querySelectorAll('.mobile-payment-form-container').forEach(container => {
+                    container.style.display = 'none';
+                });
+                
+                // Remove selected class from all mobile wrappers
+                document.querySelectorAll('.mobile-payment-method-wrapper').forEach(wrapper => {
+                    wrapper.classList.remove('selected');
+                });
+                
+                // Show selected mobile payment form
+                const selectedForm = document.getElementById(`mobile-payment-form-${selectedGateway}`);
+                const selectedWrapper = document.querySelector(`.mobile-payment-method-wrapper[data-gateway="${selectedGateway}"]`);
+                
+                if (selectedForm) {
+                    selectedForm.style.display = 'block';
+                }
+                
+                if (selectedWrapper) {
+                    selectedWrapper.classList.add('selected');
+                }
+            }
+            
+            // Initialize Mollie Components if credit card is selected
+            if (selectedGateway.includes('mollie') && selectedGateway.includes('creditcard')) {
+                // Wait longer for DOM to be ready
+                setTimeout(() => {
+                    initializeMollieComponents();
+                }, 300);
+            }
+        }
+
+        // Handle form submission and show loader
+        function handleFormSubmission() {
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.classList.add('active');
+            return true;
+        }
+
+        // Add form submission handler
+        document.addEventListener('DOMContentLoaded', function() {
+            const forms = document.querySelectorAll('form.checkout');
+            forms.forEach(form => {
+                form.addEventListener('submit', function(e) {
+                    // Handle Mollie card token if needed
+                    const paymentMethod = document.querySelector('input[name="payment_method"]:checked');
+                    if (paymentMethod && paymentMethod.value.includes('mollie') && paymentMethod.value.includes('creditcard') && mollieInstance) {
+                        e.preventDefault();
+                        
+                        mollieInstance.createToken().then(result => {
+                            if (result.error) {
+                                console.error('Mollie token error:', result.error);
+                                alert('Please check your card details and try again.');
+                                return;
+                            }
+                            
+                            if (result.token) {
+                                // Add token to form
+                                const tokenField = document.createElement('input');
+                                tokenField.type = 'hidden';
+                                tokenField.name = 'cardToken';
+                                tokenField.value = result.token;
+                                form.appendChild(tokenField);
+                                
+                                // Submit form
+                                form.submit();
+                            }
+                        }).catch(error => {
+                            console.error('Mollie error:', error);
+                            alert('Payment processing error. Please try again.');
+                        });
+                        
+                        return false;
+                    }
+                    
+                    // Handle package selection for normal submissions
+                    return handleFormSubmission();
+                });
+            });
+        });
+
+        // WooCommerce checkout events (requires jQuery)
+        jQuery(function($) {
+            $('body').on('checkout_error', function() {
+                $('#loadingOverlay').removeClass('active');
+            });
+
+            $('form.checkout').on('checkout_place_order_success', function() {
+                window.location.href = '/confirmed/';
+            });
+        });
 
         // Initialize when DOM is loaded
         document.addEventListener('DOMContentLoaded', function() {
             initCountdown();
             enhanceForm();
+            initPaymentMethods();
             
-            // Set initial display to original cart
+            // Set initial display to original cart (with FREE shipping and discreet naming)
             resetToOriginalCart();
 
             // Show video popup after 3 seconds
@@ -2805,6 +3374,7 @@ Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shi
             }, 8000);
         });
     </script>
+    <?php wp_footer(); ?>
 </body>
 
 </html>
