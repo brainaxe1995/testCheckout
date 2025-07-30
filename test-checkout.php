@@ -1711,6 +1711,11 @@ echo $head;
                             <input type="text" name="billing_postcode" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_postcode' ) ); ?>" required>
                         </div>
                     </div>
+
+                    <div>
+                        <label class="block text-sm font-bold text-gray-700 mb-1">State *</label>
+                        <input type="text" name="billing_state" class="form-input w-full text-sm" value="<?php echo esc_attr( $checkout->get_value( 'billing_state' ) ); ?>" required>
+                    </div>
                     
                     <div>
                         <label class="block text-sm font-bold text-gray-700 mb-1">Country *</label>
@@ -2390,6 +2395,11 @@ echo $head;
                                             <label class="block text-base font-bold text-gray-700 mb-2">Postal Code *</label>
                                             <input type="text" name="billing_postcode" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_postcode' ) ); ?>" required>
                                         </div>
+                                    </div>
+
+                                    <div>
+                                        <label class="block text-base font-bold text-gray-700 mb-2">State *</label>
+                                        <input type="text" name="billing_state" class="form-input w-full" value="<?php echo esc_attr( $checkout->get_value( 'billing_state' ) ); ?>" required>
                                     </div>
                                     
                                     <!-- Country Field -->
