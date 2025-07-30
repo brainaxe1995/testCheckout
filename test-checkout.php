@@ -140,6 +140,28 @@ function get_order_bump_packages_native() {
 // Get order bump packages
 $order_bump_packages = get_order_bump_packages_native();
 
+// Allow custom pricing when a bundle is selected
+add_action('woocommerce_before_calculate_totals', function($cart) {
+    if (is_admin() && !defined('DOING_AJAX')) return;
+    foreach ($cart->get_cart() as $cart_item) {
+        if (isset($cart_item['custom_price'])) {
+            $cart_item['data']->set_price($cart_item['custom_price']);
+        }
+    }
+});
+
+// If a package selection was posted, update the cart with that bundle
+if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== '') {
+    $pkg_id = intval($_POST['selected_package_id']);
+    if (isset($order_bump_packages[$pkg_id])) {
+        $pkg = $order_bump_packages[$pkg_id];
+        WC()->cart->empty_cart();
+        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price']));
+        WC()->cart->calculate_totals();
+        $cart_items = WC()->cart->get_cart(); // refresh for display
+    }
+}
+
 // Get current cart information for display with discreet naming
 $current_cart_info = array();
 if (!empty($cart_items)) {
@@ -565,6 +587,11 @@ echo $head;
         .form-input.error {
             border-color: #ef4444;
             background: #fef2f2;
+        }
+
+        .form-input.valid {
+            border-color: #3CB371;
+            background: #F0FDF4;
         }
         
         .error-message {
@@ -1689,7 +1716,7 @@ echo $head;
                                 <option value="+44">🇬🇧 +44</option>
                                 <option value="+1">🇨🇦 +1</option>
                             </select>
-                            <input type="tel" name="billing_phone" class="form-input phone-number-input text-sm" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
+                            <input type="tel" name="billing_phone" pattern="[0-9+\-\s()]{7,20}" class="form-input phone-number-input text-sm" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
                         </div>
                     </div>
                 </div>
@@ -2377,7 +2404,7 @@ echo $head;
                                                 <option value="+44">🇬🇧 +44</option>
                                                 <option value="+1">🇨🇦 +1</option>
                                             </select>
-                                            <input type="tel" name="billing_phone" class="form-input phone-number-input" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
+                                            <input type="tel" name="billing_phone" pattern="[0-9+\-\s()]{7,20}" class="form-input phone-number-input" placeholder="123-456-7890" value="<?php echo esc_attr( $checkout->get_value( 'billing_phone' ) ); ?>" required>
                                         </div>
                                     </div>
                                     
@@ -3109,19 +3136,53 @@ echo $head;
         // Form validation and enhancement
         function enhanceForm() {
             const inputs = document.querySelectorAll('.form-input');
-            
+
+            function validateField(field) {
+                let valid = true;
+                if (field.name === 'billing_phone') {
+                    const phonePattern = /^[0-9+\-\s()]{7,20}$/;
+                    valid = phonePattern.test(field.value.trim());
+                } else {
+                    valid = field.checkValidity();
+                }
+
+                if (valid) {
+                    field.classList.remove('error');
+                    field.classList.add('valid');
+                    const err = field.parentNode.querySelector('.error-message');
+                    if (err) err.style.display = 'none';
+                } else {
+                    field.classList.remove('valid');
+                    field.classList.add('error');
+                    let err = field.parentNode.querySelector('.error-message');
+                    if (!err) {
+                        err = document.createElement('span');
+                        err.className = 'error-message';
+                        field.parentNode.appendChild(err);
+                    }
+                    err.textContent = field.name === 'billing_phone' ? 'Please enter a valid phone number.' : 'This field is required';
+                    err.style.display = 'block';
+                }
+                return valid;
+            }
+
             inputs.forEach(input => {
                 input.addEventListener('focus', function() {
                     this.style.borderColor = '#3CB371';
                     this.style.boxShadow = '0 0 0 3px rgba(60, 179, 113, 0.1)';
                     this.classList.remove('error');
                 });
-                
+
                 input.addEventListener('blur', function() {
                     if (!this.value) {
                         this.style.borderColor = '#e2e8f0';
                         this.style.boxShadow = 'none';
                     }
+                    validateField(this);
+                });
+
+                input.addEventListener('input', function() {
+                    validateField(this);
                 });
             });
         }
@@ -3229,43 +3290,11 @@ echo $head;
             }
         }
 
-        // Handle form submission with package selection
+        // Handle form submission and show loader
         function handleFormSubmission() {
-            // Before form submission, update cart if package is selected
-            if (selectedPackageId && orderBumpPackages[selectedPackageId]) {
-                const package = orderBumpPackages[selectedPackageId];
-                
-                // Create a hidden form to update cart
-                const updateForm = document.createElement('form');
-                updateForm.method = 'POST';
-                updateForm.style.display = 'none';
-                
-                // Add product to cart with custom quantity and price
-                const productIdField = document.createElement('input');
-                productIdField.type = 'hidden';
-                productIdField.name = 'add-to-cart';
-                productIdField.value = package.product_id;
-                updateForm.appendChild(productIdField);
-                
-                const quantityField = document.createElement('input');
-                quantityField.type = 'hidden';
-                quantityField.name = 'quantity';
-                quantityField.value = package.quantity;
-                updateForm.appendChild(quantityField);
-                
-                // Add custom price data
-                const customPriceField = document.createElement('input');
-                customPriceField.type = 'hidden';
-                customPriceField.name = 'custom_price';
-                customPriceField.value = package.price;
-                updateForm.appendChild(customPriceField);
-                
-                document.body.appendChild(updateForm);
-                updateForm.submit();
-                return false; // Prevent normal form submission
-            }
-            
-            return true; // Allow normal form submission
+            const overlay = document.getElementById('loadingOverlay');
+            if (overlay) overlay.classList.add('active');
+            return true;
         }
 
         // Add form submission handler
@@ -3307,6 +3336,17 @@ echo $head;
                     // Handle package selection for normal submissions
                     return handleFormSubmission();
                 });
+            });
+        });
+
+        // WooCommerce checkout events (requires jQuery)
+        jQuery(function($) {
+            $('body').on('checkout_error', function() {
+                $('#loadingOverlay').removeClass('active');
+            });
+
+            $('form.checkout').on('checkout_place_order_success', function() {
+                window.location.href = '/confirmed/';
             });
         });
 
