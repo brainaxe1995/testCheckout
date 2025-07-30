@@ -2,6 +2,7 @@
 /*
 Template Name: Discreet Health Checkout - High-Converting WooCommerce - Free Shipping
 */
+?>
 <!DOCTYPE html>
 <html lang="en">
 <head>
