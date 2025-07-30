@@ -12,6 +12,8 @@ This repository contains a custom WordPress page template designed to replace th
 1. Copy `test-checkout.php` into the root directory of your active theme (or child theme).
 2. In the WordPress admin dashboard, create a new page and select **Discreet Health Checkout - High-Converting WooCommerce - Free Shipping** from the **Template** dropdown.
 3. Publish the page. When viewed, it will render the custom checkout UI while processing orders via WooCommerce.
+4. Copy `page-checkout-success.php` into the same theme directory and create a new page using the **Checkout Success** template. Set this page's URL to `/confirmed/`.
+5. WooCommerce will redirect to this success page after a completed order.
 
 ## Customisation
 
