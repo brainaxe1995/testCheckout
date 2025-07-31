@@ -150,57 +150,13 @@ add_action('woocommerce_before_calculate_totals', function($cart) {
     }
 });
 
-// AJAX handler to update cart when bundle selection changes
-add_action('wp_ajax_dh_update_cart_bundle', 'dh_update_cart_bundle');
-add_action('wp_ajax_nopriv_dh_update_cart_bundle', 'dh_update_cart_bundle');
-function dh_update_cart_bundle() {
-    $packages = get_order_bump_packages_native();
-
-    // Reset to original cart when requested
-    if (!empty($_POST['reset']) && isset($_POST['product_id'])) {
-        $product_id = intval($_POST['product_id']);
-        $quantity   = isset($_POST['quantity']) ? intval($_POST['quantity']) : 1;
-        WC()->cart->empty_cart();
-        WC()->cart->add_to_cart($product_id, $quantity);
-        WC()->cart->calculate_totals();
-        wp_send_json_success();
-    }
-
-    if (isset($_POST['package_id']) && $_POST['package_id'] !== '' ) {
-        $pkg_id = intval($_POST['package_id']);
-        if (isset($packages[$pkg_id])) {
-            $pkg = $packages[$pkg_id];
-            $per_item_price = $pkg['price'] / max(1, $pkg['quantity']);
-            WC()->cart->empty_cart();
-            WC()->cart->add_to_cart(
-                $pkg['product_id'],
-                $pkg['quantity'],
-                0,
-                array(),
-                array('custom_price' => $per_item_price)
-            );
-            WC()->cart->calculate_totals();
-            wp_send_json_success();
-        }
-    }
-
-    wp_send_json_error('invalid_package');
-}
-
 // If a package selection was posted, update the cart with that bundle
 if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== '') {
     $pkg_id = intval($_POST['selected_package_id']);
     if (isset($order_bump_packages[$pkg_id])) {
         $pkg = $order_bump_packages[$pkg_id];
-        $per_item_price = $pkg['price'] / max(1, $pkg['quantity']);
         WC()->cart->empty_cart();
-        WC()->cart->add_to_cart(
-            $pkg['product_id'],
-            $pkg['quantity'],
-            0,
-            array(),
-            array('custom_price' => $per_item_price)
-        );
+        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price']));
         WC()->cart->calculate_totals();
         $cart_items = WC()->cart->get_cart(); // refresh for display
     }
@@ -2667,7 +2623,6 @@ echo $head;
         const blackMarketMarkupPercentage = <?php echo $black_market_markup_percentage; ?>; // Dynamic markup percentage
         const hardcodedFallbackPrice = <?php echo $hardcoded_fallback_price; ?>; // Hardcoded fallback price
         const isFromFunnel = <?php echo $is_from_funnel ? 'true' : 'false'; ?>; // Track if user came from funnel
-        const ajaxUrl = '<?php echo admin_url('admin-ajax.php'); ?>';
         
         console.log('Shipping Cost:', shippingCost);
         console.log('Order Bump Packages:', orderBumpPackages);
@@ -2680,34 +2635,6 @@ echo $head;
         let isOrderBumpSelected = false; // Track if order bump is selected
         let mollieInstance = null; // Store Mollie instance
         let mollieComponents = {}; // Store Mollie components
-
-        function updateWooCommerceCart(packageId) {
-            const formData = new FormData();
-            formData.append('action', 'dh_update_cart_bundle');
-            if (packageId !== null && packageId !== '') {
-                formData.append('package_id', packageId);
-            } else {
-                formData.append('reset', '1');
-                if (currentCartInfo && currentCartInfo.product_id) {
-                    formData.append('product_id', currentCartInfo.product_id);
-                    formData.append('quantity', currentCartInfo.quantity || 1);
-                }
-            }
-
-            fetch(ajaxUrl, {
-                method: 'POST',
-                credentials: 'same-origin',
-                body: formData
-            })
-                .then(res => res.json())
-                .then(data => {
-                    console.log('Cart update response:', data);
-                    if (typeof jQuery !== 'undefined') {
-                        jQuery('body').trigger('update_checkout');
-                    }
-                })
-                .catch(err => console.error('Cart update error:', err));
-        }
 
         // Initialize Mollie Components - COMPLETELY REWRITTEN
         function initializeMollieComponents() {
@@ -2976,9 +2903,6 @@ echo $head;
 
             // Show reset button
             showResetButton();
-
-            // Update WooCommerce cart
-            updateWooCommerceCart(packageId);
         }
 
         // Mobile package selection
@@ -3021,9 +2945,6 @@ echo $head;
 
             // Show reset button
             showResetButton();
-
-            // Update WooCommerce cart
-            updateWooCommerceCart(packageId);
         }
 
         // Show reset button
@@ -3177,9 +3098,6 @@ echo $head;
             if (mobilePrice) mobilePrice.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (mobileBlackMarketPrice) mobileBlackMarketPrice.textContent = `$${(initialSubtotal * (1 + blackMarketMarkupPercentage/100)).toFixed(2)}`;
             if (mobileShippingBadge) mobileShippingBadge.textContent = 'FREE SHIPPING';
-
-            // Reset WooCommerce cart
-            updateWooCommerceCart(null);
         }
 
         // Countdown timer
