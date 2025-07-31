@@ -140,15 +140,91 @@ function get_order_bump_packages_native() {
 // Get order bump packages
 $order_bump_packages = get_order_bump_packages_native();
 
-// Allow custom pricing when a bundle is selected
+// Ensure custom pricing and package data are applied correctly
 add_action('woocommerce_before_calculate_totals', function($cart) {
-    if (is_admin() && !defined('DOING_AJAX')) return;
-    foreach ($cart->get_cart() as $cart_item) {
+    if (is_admin() && !defined('DOING_AJAX')) {
+        return;
+    }
+
+    foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
         if (isset($cart_item['custom_price'])) {
             $cart_item['data']->set_price($cart_item['custom_price']);
         }
+
+        if (isset($cart_item['package_data'])) {
+            $package_data = $cart_item['package_data'];
+            $total_package_price = $package_data['price'];
+            $quantity = $cart_item['quantity'];
+            $price_per_item = $total_package_price / $quantity;
+            $cart_item['data']->set_price($price_per_item);
+        }
     }
-});
+}, 10, 1);
+
+// Preserve package information in the order items
+add_action('woocommerce_checkout_create_order_line_item', function($item, $cart_item_key, $values, $order) {
+    if (isset($values['package_data'])) {
+        $package_data = $values['package_data'];
+        $item->add_meta_data('Package Type', $package_data['title']);
+        $item->add_meta_data('Package Description', $package_data['description']);
+        $item->add_meta_data('Total Pills', $package_data['pills_total']);
+        $item->add_meta_data('Package Price', $package_data['price']);
+        $item->add_meta_data('Savings', $package_data['savings']);
+    }
+}, 10, 4);
+
+// Handle AJAX-like requests directly on this page
+if (isset($_POST['ajax_action'])) {
+    $ajax_action = sanitize_text_field($_POST['ajax_action']);
+
+    if ($ajax_action === 'update_cart_package') {
+        $package_id = intval($_POST['selected_package_id']);
+
+        if (isset($order_bump_packages[$package_id])) {
+            $package = $order_bump_packages[$package_id];
+
+            // Clear existing cart and add selected package
+            WC()->cart->empty_cart();
+            $price_per_item = $package['price'] / $package['quantity'];
+            WC()->cart->add_to_cart(
+                $package['product_id'],
+                $package['quantity'],
+                0,
+                array(),
+                array('custom_price' => $price_per_item, 'package_data' => $package)
+            );
+            WC()->cart->calculate_totals();
+
+            wp_send_json_success(array(
+                'message' => 'Cart updated successfully',
+                'package' => $package,
+                'cart_total' => WC()->cart->get_total(),
+            ));
+        }
+
+        wp_send_json_error(array('message' => 'Invalid package ID'));
+    }
+
+    if ($ajax_action === 'reset_cart_original') {
+        global $hardcoded_fallback_price, $hardcoded_fallback_quantity;
+
+        // Reset cart to original single item
+        WC()->cart->empty_cart();
+        WC()->cart->add_to_cart(
+            1,
+            $hardcoded_fallback_quantity,
+            0,
+            array(),
+            array('custom_price' => $hardcoded_fallback_price)
+        );
+        WC()->cart->calculate_totals();
+
+        wp_send_json_success(array(
+            'message' => 'Cart reset successfully',
+            'cart_total' => WC()->cart->get_total(),
+        ));
+    }
+}
 
 // If a package selection was posted, update the cart with that bundle
 if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== '') {
@@ -156,7 +232,7 @@ if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== ''
     if (isset($order_bump_packages[$pkg_id])) {
         $pkg = $order_bump_packages[$pkg_id];
         WC()->cart->empty_cart();
-        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price']));
+        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price'] / $pkg['quantity']));
         WC()->cart->calculate_totals();
         $cart_items = WC()->cart->get_cart(); // refresh for display
     }
@@ -2870,6 +2946,9 @@ echo $head;
         function selectOrderBump(packageId) {
             console.log('Selecting order bump:', packageId);
             
+            // Submit form to update cart on server
+            updateCartWithPackage(packageId);
+
             // Remove selected class from all bumps
             document.querySelectorAll('.order-bump').forEach(bump => {
                 bump.classList.remove('selected');
@@ -2909,6 +2988,9 @@ echo $head;
         function selectMobilePackage(packageId, title, price) {
             console.log('Selecting mobile package:', packageId, title, price);
             
+            // Submit form to update cart on server
+            updateCartWithPackage(packageId);
+
             // Remove selected class from all packages
             document.querySelectorAll('.mobile-package-card').forEach(card => {
                 card.classList.remove('selected');
@@ -3015,40 +3097,88 @@ echo $head;
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
         }
 
-        // Reset to original cart display with discreet naming
+        // Update cart with selected package without page reload
+        function updateCartWithPackage(packageId) {
+            const formData = new FormData();
+            formData.append('selected_package_id', packageId);
+            formData.append('ajax_action', 'update_cart_package');
+
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Cart updated successfully');
+                    updateProductDisplay(packageId);
+                    showResetButton();
+                } else {
+                    console.error('Failed to update cart:', data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error updating cart:', error);
+            });
+        }
+
+        // Reset cart to original item
         function resetToOriginalCart() {
             console.log('Resetting to original cart');
-            
+
+            const formData = new FormData();
+            formData.append('ajax_action', 'reset_cart_original');
+
+            fetch(window.location.href, {
+                method: 'POST',
+                body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+                if (data.success) {
+                    console.log('Cart reset successfully');
+                    resetUIToOriginal();
+                } else {
+                    console.error('Failed to reset cart:', data.message);
+                }
+            })
+            .catch(error => {
+                console.error('Error resetting cart:', error);
+            });
+        }
+
+        // Reset UI to original state
+        function resetUIToOriginal() {
             // Clear all selections
             selectedPackageId = null;
             isOrderBumpSelected = false;
-            
+
             // Clear hidden fields
             const hiddenFields = document.querySelectorAll('#selected_package_id');
             hiddenFields.forEach(field => {
                 field.value = '';
             });
-            
+
             // Remove selected class from all bumps
             document.querySelectorAll('.order-bump').forEach(bump => {
                 bump.classList.remove('selected');
             });
-            
+
             // Remove checked class from all radios
             document.querySelectorAll('.order-bump-radio').forEach(radio => {
                 radio.classList.remove('checked');
             });
-            
+
             // Remove selected class from all mobile packages
             document.querySelectorAll('.mobile-package-card').forEach(card => {
                 card.classList.remove('selected');
             });
-            
+
             // Hide reset button
             hideResetButton();
-            
+
             if (!currentCartInfo || !currentCartInfo.discreet_title) return;
-            
+
             // Update desktop product title with discreet name
             const desktopTitle = document.getElementById('desktop-product-title');
             if (desktopTitle) {
@@ -3060,26 +3190,26 @@ echo $head;
             if (desktopPillsInfo) {
                 desktopPillsInfo.textContent = '4 PILLS PER PACK 50mg';
             }
-            
+
             // Update cart item details with discreet naming
             const cartItemTitle = document.getElementById('cart-item-title');
             const cartItemQuantity = document.getElementById('cart-item-quantity');
             const cartItemTotal = document.getElementById('cart-item-total');
             const cartItemPills = document.getElementById('cart-item-pills');
             const cartBlackMarketPrice = document.getElementById('cart-black-market-price');
-            
+
             if (cartItemTitle) cartItemTitle.textContent = currentCartInfo.discreet_title;
             if (cartItemQuantity) cartItemQuantity.textContent = `Quantity: ${currentCartInfo.quantity}`;
             if (cartItemTotal) cartItemTotal.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (cartItemPills) cartItemPills.textContent = '4 PILLS PER PACK 50mg';
             if (cartBlackMarketPrice) cartBlackMarketPrice.textContent = `Market price: $${(initialSubtotal * (1 + blackMarketMarkupPercentage/100)).toFixed(2)}`;
-            
+
             // Update order summary with FREE shipping
             const subtotalElement = document.getElementById('desktop-subtotal');
             const shippingElement = document.getElementById('desktop-shipping-cost');
             const totalElement = document.getElementById('desktop-total');
             const shippingGuarantee = document.getElementById('desktop-shipping-guarantee');
-            
+
             if (subtotalElement) subtotalElement.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (shippingElement) {
                 shippingElement.textContent = 'FREE';
@@ -3087,13 +3217,13 @@ echo $head;
             }
             if (totalElement) totalElement.textContent = `$${initialTotal.toFixed(2)}`;
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
-            
+
             // Update mobile display with discreet naming
             const mobileTitle = document.getElementById('mobile-product-title');
             const mobilePrice = document.getElementById('mobile-product-price');
             const mobileBlackMarketPrice = document.getElementById('mobile-black-market-price');
             const mobileShippingBadge = document.getElementById('mobile-shipping-badge');
-            
+
             if (mobileTitle) mobileTitle.textContent = currentCartInfo.discreet_title;
             if (mobilePrice) mobilePrice.textContent = `$${initialSubtotal.toFixed(2)}`;
             if (mobileBlackMarketPrice) mobileBlackMarketPrice.textContent = `$${(initialSubtotal * (1 + blackMarketMarkupPercentage/100)).toFixed(2)}`;
@@ -3373,5 +3503,7 @@ echo $head;
 </body>
 
 <?php wp_footer(); ?>
+
+</html>
 
 </html>
