@@ -140,15 +140,91 @@ function get_order_bump_packages_native() {
 // Get order bump packages
 $order_bump_packages = get_order_bump_packages_native();
 
-// Allow custom pricing when a bundle is selected
+// Ensure custom pricing and package data are applied correctly
 add_action('woocommerce_before_calculate_totals', function($cart) {
-    if (is_admin() && !defined('DOING_AJAX')) return;
-    foreach ($cart->get_cart() as $cart_item) {
+    if (is_admin() && !defined('DOING_AJAX')) {
+        return;
+    }
+
+    foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
         if (isset($cart_item['custom_price'])) {
             $cart_item['data']->set_price($cart_item['custom_price']);
         }
+
+        if (isset($cart_item['package_data'])) {
+            $package_data = $cart_item['package_data'];
+            $total_package_price = $package_data['price'];
+            $quantity = $cart_item['quantity'];
+            $price_per_item = $total_package_price / $quantity;
+            $cart_item['data']->set_price($price_per_item);
+        }
     }
-});
+}, 10, 1);
+
+// Preserve package information in the order items
+add_action('woocommerce_checkout_create_order_line_item', function($item, $cart_item_key, $values, $order) {
+    if (isset($values['package_data'])) {
+        $package_data = $values['package_data'];
+        $item->add_meta_data('Package Type', $package_data['title']);
+        $item->add_meta_data('Package Description', $package_data['description']);
+        $item->add_meta_data('Total Pills', $package_data['pills_total']);
+        $item->add_meta_data('Package Price', $package_data['price']);
+        $item->add_meta_data('Savings', $package_data['savings']);
+    }
+}, 10, 4);
+
+// Handle AJAX-like requests directly on this page
+if (isset($_POST['ajax_action'])) {
+    $ajax_action = sanitize_text_field($_POST['ajax_action']);
+
+    if ($ajax_action === 'update_cart_package') {
+        $package_id = intval($_POST['selected_package_id']);
+
+        if (isset($order_bump_packages[$package_id])) {
+            $package = $order_bump_packages[$package_id];
+
+            // Clear existing cart and add selected package
+            WC()->cart->empty_cart();
+            $price_per_item = $package['price'] / $package['quantity'];
+            WC()->cart->add_to_cart(
+                $package['product_id'],
+                $package['quantity'],
+                0,
+                array(),
+                array('custom_price' => $price_per_item, 'package_data' => $package)
+            );
+            WC()->cart->calculate_totals();
+
+            wp_send_json_success(array(
+                'message' => 'Cart updated successfully',
+                'package' => $package,
+                'cart_total' => WC()->cart->get_total(),
+            ));
+        }
+
+        wp_send_json_error(array('message' => 'Invalid package ID'));
+    }
+
+    if ($ajax_action === 'reset_cart_original') {
+        global $hardcoded_fallback_price, $hardcoded_fallback_quantity;
+
+        // Reset cart to original single item
+        WC()->cart->empty_cart();
+        WC()->cart->add_to_cart(
+            1,
+            $hardcoded_fallback_quantity,
+            0,
+            array(),
+            array('custom_price' => $hardcoded_fallback_price)
+        );
+        WC()->cart->calculate_totals();
+
+        wp_send_json_success(array(
+            'message' => 'Cart reset successfully',
+            'cart_total' => WC()->cart->get_total(),
+        ));
+    }
+}
 
 // If a package selection was posted, update the cart with that bundle
 if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== '') {
@@ -3021,14 +3097,13 @@ echo $head;
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
         }
 
-        // Update cart with selected package via AJAX
+        // Update cart with selected package without page reload
         function updateCartWithPackage(packageId) {
             const formData = new FormData();
             formData.append('selected_package_id', packageId);
-            formData.append('action', 'update_cart_package');
-            formData.append('nonce', '<?php echo wp_create_nonce('update_cart_package'); ?>');
+            formData.append('ajax_action', 'update_cart_package');
 
-            fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+            fetch(window.location.href, {
                 method: 'POST',
                 body: formData
             })
@@ -3036,7 +3111,6 @@ echo $head;
             .then(data => {
                 if (data.success) {
                     console.log('Cart updated successfully');
-                    // Update the cart display
                     updateProductDisplay(packageId);
                     showResetButton();
                 } else {
@@ -3048,15 +3122,14 @@ echo $head;
             });
         }
 
-        // Reset cart to original item via AJAX
+        // Reset cart to original item
         function resetToOriginalCart() {
             console.log('Resetting to original cart');
 
             const formData = new FormData();
-            formData.append('action', 'reset_cart_original');
-            formData.append('nonce', '<?php echo wp_create_nonce('reset_cart_original'); ?>');
+            formData.append('ajax_action', 'reset_cart_original');
 
-            fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+            fetch(window.location.href, {
                 method: 'POST',
                 body: formData
             })
@@ -3064,7 +3137,6 @@ echo $head;
             .then(data => {
                 if (data.success) {
                     console.log('Cart reset successfully');
-                    // Update UI to show original cart
                     resetUIToOriginal();
                 } else {
                     console.error('Failed to reset cart:', data.message);
@@ -3432,115 +3504,6 @@ echo $head;
 
 <?php wp_footer(); ?>
 
-<?php
-// AJAX handler for updating cart with package
-add_action('wp_ajax_update_cart_package', 'handle_update_cart_package');
-add_action('wp_ajax_nopriv_update_cart_package', 'handle_update_cart_package');
-
-function handle_update_cart_package() {
-    // Verify nonce
-    if (!wp_verify_nonce($_POST['nonce'], 'update_cart_package')) {
-        wp_die('Security check failed');
-    }
-    
-    $package_id = intval($_POST['selected_package_id']);
-    
-    // Get order bump packages
-    $order_bump_packages = get_order_bump_packages_native();
-    
-    if (isset($order_bump_packages[$package_id])) {
-        $package = $order_bump_packages[$package_id];
-        
-        // Clear existing cart
-        WC()->cart->empty_cart();
-        
-        // Add new package to cart with correct pricing
-        $price_per_item = $package['price'] / $package['quantity'];
-        WC()->cart->add_to_cart(
-            $package['product_id'], 
-            $package['quantity'], 
-            0, 
-            array(), 
-            array('custom_price' => $price_per_item, 'package_data' => $package)
-        );
-        
-        // Calculate totals
-        WC()->cart->calculate_totals();
-        
-        wp_send_json_success(array(
-            'message' => 'Cart updated successfully',
-            'package' => $package,
-            'cart_total' => WC()->cart->get_total()
-        ));
-    } else {
-        wp_send_json_error(array('message' => 'Invalid package ID'));
-    }
-}
-
-// AJAX handler for resetting cart to original
-add_action('wp_ajax_reset_cart_original', 'handle_reset_cart_original');
-add_action('wp_ajax_nopriv_reset_cart_original', 'handle_reset_cart_original');
-
-function handle_reset_cart_original() {
-    // Verify nonce
-    if (!wp_verify_nonce($_POST['nonce'], 'reset_cart_original')) {
-        wp_die('Security check failed');
-    }
-    
-    global $hardcoded_fallback_price, $hardcoded_fallback_quantity;
-    
-    // Clear existing cart
-    WC()->cart->empty_cart();
-    
-    // Add original single item back to cart
-    WC()->cart->add_to_cart(
-        1, // product_id
-        $hardcoded_fallback_quantity, 
-        0, 
-        array(), 
-        array('custom_price' => $hardcoded_fallback_price)
-    );
-    
-    // Calculate totals
-    WC()->cart->calculate_totals();
-    
-    wp_send_json_success(array(
-        'message' => 'Cart reset successfully',
-        'cart_total' => WC()->cart->get_total()
-    ));
-}
-
-// Enhanced custom pricing handler to ensure correct totals
-add_action('woocommerce_before_calculate_totals', function($cart) {
-    if (is_admin() && !defined('DOING_AJAX')) return;
-    
-    foreach ($cart->get_cart() as $cart_item_key => $cart_item) {
-        if (isset($cart_item['custom_price'])) {
-            $cart_item['data']->set_price($cart_item['custom_price']);
-        }
-        
-        // If this is a package item, ensure the line total is correct
-        if (isset($cart_item['package_data'])) {
-            $package_data = $cart_item['package_data'];
-            $total_package_price = $package_data['price'];
-            $quantity = $cart_item['quantity'];
-            $price_per_item = $total_package_price / $quantity;
-            $cart_item['data']->set_price($price_per_item);
-        }
-    }
-}, 10, 1);
-
-// Ensure order meta is saved with package information
-add_action('woocommerce_checkout_create_order_line_item', function($item, $cart_item_key, $values, $order) {
-    if (isset($values['package_data'])) {
-        $package_data = $values['package_data'];
-        $item->add_meta_data('Package Type', $package_data['title']);
-        $item->add_meta_data('Package Description', $package_data['description']);
-        $item->add_meta_data('Total Pills', $package_data['pills_total']);
-        $item->add_meta_data('Package Price', $package_data['price']);
-        $item->add_meta_data('Savings', $package_data['savings']);
-    }
-}, 10, 4);
-?>
+</html>
 
 </html>
