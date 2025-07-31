@@ -155,19 +155,8 @@ if (isset($_POST['selected_package_id']) && $_POST['selected_package_id'] !== ''
     $pkg_id = intval($_POST['selected_package_id']);
     if (isset($order_bump_packages[$pkg_id])) {
         $pkg = $order_bump_packages[$pkg_id];
-        // Convert bundle price to per-item price so the line total matches the
-        // advertised bundle total. Without this, WooCommerce would multiply the
-        // bundle price by the quantity and overcharge the customer.
-        $price_per_item = $pkg['price'] / max(1, $pkg['quantity']);
-
         WC()->cart->empty_cart();
-        WC()->cart->add_to_cart(
-            $pkg['product_id'],
-            $pkg['quantity'],
-            0,
-            array(),
-            array('custom_price' => $price_per_item)
-        );
+        WC()->cart->add_to_cart($pkg['product_id'], $pkg['quantity'], 0, array(), array('custom_price' => $pkg['price']));
         WC()->cart->calculate_totals();
         $cart_items = WC()->cart->get_cart(); // refresh for display
     }
