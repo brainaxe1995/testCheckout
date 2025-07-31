@@ -3055,8 +3055,12 @@ echo $head;
 
             return fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
-            }).then(response => response.json());
+            }).then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
+            });
         }
 
         // Update cart with selected package via AJAX
@@ -3068,9 +3072,13 @@ echo $head;
 
             fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
+            })
             .then(data => {
                 if (data.success && data.data) {
                     console.log('Cart updated successfully');
@@ -3100,9 +3108,13 @@ echo $head;
 
             fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
                 method: 'POST',
+                credentials: 'same-origin',
                 body: formData
             })
-            .then(response => response.json())
+            .then(response => {
+                if (!response.ok) throw new Error('Network response was not ok');
+                return response.json();
+            })
             .then(data => {
                 if (data.success) {
                     console.log('Cart reset successfully');
