@@ -3500,10 +3500,6 @@ echo $head;
             }, 8000);
         });
     </script>
+    <?php wp_footer(); ?>
 </body>
-
-<?php wp_footer(); ?>
-
-</html>
-
 </html>
