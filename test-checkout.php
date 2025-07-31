@@ -2617,6 +2617,7 @@ echo $head;
         const shippingCost = 0.00; // FREE SHIPPING
         const orderBumpPackages = <?php echo json_encode($order_bump_packages); ?>;
         const currentCartInfo = <?php echo json_encode($current_cart_info); ?>;
+        const originalCartInfo = { ...currentCartInfo };
         const initialSubtotal = <?php echo $initial_subtotal; ?>;
         const initialShipping = 0.00; // FREE SHIPPING
         const initialTotal = <?php echo $initial_total; ?>;
@@ -2966,9 +2967,34 @@ echo $head;
         function hideResetButton() {
             const mobileResetBtn = document.getElementById('mobile-reset-btn');
             const desktopResetBtn = document.getElementById('desktop-reset-btn');
-            
+
             if (mobileResetBtn) mobileResetBtn.style.display = 'none';
             if (desktopResetBtn) desktopResetBtn.style.display = 'none';
+        }
+
+        // Display current cart information without modifying the session
+        function displayCurrentCart() {
+            if (!currentCartInfo) return;
+
+            const desktopTitle = document.getElementById('desktop-product-title');
+            if (desktopTitle) desktopTitle.textContent = currentCartInfo.discreet_title;
+
+            const cartItemTitle = document.getElementById('cart-item-title');
+            const cartItemQuantity = document.getElementById('cart-item-quantity');
+            const cartItemTotal = document.getElementById('cart-item-total');
+            if (cartItemTitle) cartItemTitle.textContent = currentCartInfo.discreet_title;
+            if (cartItemQuantity) cartItemQuantity.textContent = `Quantity: ${currentCartInfo.quantity}`;
+            if (cartItemTotal) cartItemTotal.textContent = `$${Number(currentCartInfo.price).toFixed(2)}`;
+
+            const subtotalElement = document.getElementById('desktop-subtotal');
+            const totalElement = document.getElementById('desktop-total');
+            if (subtotalElement) subtotalElement.textContent = `$${Number(currentCartInfo.price).toFixed(2)}`;
+            if (totalElement) totalElement.textContent = `$${Number(currentCartInfo.price).toFixed(2)}`;
+
+            const mobileTitle = document.getElementById('mobile-product-title');
+            const mobilePrice = document.getElementById('mobile-product-price');
+            if (mobileTitle) mobileTitle.textContent = currentCartInfo.discreet_title;
+            if (mobilePrice) mobilePrice.textContent = `$${Number(currentCartInfo.price).toFixed(2)}`;
         }
 
         // Update product display with package information using discreet naming
@@ -3021,6 +3047,18 @@ echo $head;
             if (shippingGuarantee) shippingGuarantee.textContent = 'Free Shipping';
         }
 
+        // Fetch current cart information via AJAX
+        function fetchCurrentCart() {
+            const formData = new FormData();
+            formData.append('action', 'fetch_current_cart');
+            formData.append('nonce', '<?php echo wp_create_nonce('fetch_current_cart'); ?>');
+
+            return fetch('<?php echo admin_url('admin-ajax.php'); ?>', {
+                method: 'POST',
+                body: formData
+            }).then(response => response.json());
+        }
+
         // Update cart with selected package via AJAX
         function updateCartWithPackage(packageId) {
             const formData = new FormData();
@@ -3034,11 +3072,15 @@ echo $head;
             })
             .then(response => response.json())
             .then(data => {
-                if (data.success) {
+                if (data.success && data.data) {
                     console.log('Cart updated successfully');
-                    // Update the cart display
+                    const pkg = data.data.package;
+                    currentCartInfo.discreet_title = pkg.discreet_title;
+                    currentCartInfo.quantity = pkg.quantity;
+                    currentCartInfo.price = pkg.price;
                     updateProductDisplay(packageId);
                     showResetButton();
+                    displayCurrentCart();
                 } else {
                     console.error('Failed to update cart:', data.message);
                 }
@@ -3064,8 +3106,9 @@ echo $head;
             .then(data => {
                 if (data.success) {
                     console.log('Cart reset successfully');
-                    // Update UI to show original cart
+                    Object.assign(currentCartInfo, originalCartInfo);
                     resetUIToOriginal();
+                    displayCurrentCart();
                 } else {
                     console.error('Failed to reset cart:', data.message);
                 }
@@ -3413,9 +3456,15 @@ echo $head;
             initCountdown();
             enhanceForm();
             initPaymentMethods();
-            
-            // Set initial display to original cart (with FREE shipping and discreet naming)
-            resetToOriginalCart();
+
+            fetchCurrentCart().then(data => {
+                if (data.success && data.data) {
+                    currentCartInfo.quantity = data.data.quantity;
+                    currentCartInfo.price = data.data.total;
+                    Object.assign(originalCartInfo, currentCartInfo);
+                }
+                displayCurrentCart();
+            });
 
             // Show video popup after 3 seconds
             setTimeout(() => {
@@ -3433,6 +3482,24 @@ echo $head;
 <?php wp_footer(); ?>
 
 <?php
+// AJAX handler for fetching current cart details
+add_action('wp_ajax_fetch_current_cart', 'handle_fetch_current_cart');
+add_action('wp_ajax_nopriv_fetch_current_cart', 'handle_fetch_current_cart');
+
+function handle_fetch_current_cart() {
+    if (!wp_verify_nonce($_POST['nonce'], 'fetch_current_cart')) {
+        wp_die('Security check failed');
+    }
+
+    $quantity = WC()->cart->get_cart_contents_count();
+    $total = (float) WC()->cart->get_cart_contents_total();
+
+    wp_send_json_success(array(
+        'quantity' => $quantity,
+        'total' => $total
+    ));
+}
+
 // AJAX handler for updating cart with package
 add_action('wp_ajax_update_cart_package', 'handle_update_cart_package');
 add_action('wp_ajax_nopriv_update_cart_package', 'handle_update_cart_package');
